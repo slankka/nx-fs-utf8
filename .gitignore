@@ -1,0 +1,7 @@
+/build/
+/fs_codecvt.elf
+/fs_codecvt_unpacked.kip
+*.map
+*.lst
+__pycache__/
+*.pyc

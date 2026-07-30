@@ -1,0 +1,14 @@
+nx_fscodecvt contains startup and low-level runtime code derived from the
+Atmosphère emuMMC project.
+
+Copyright (c) 2019 m4xw
+Copyright (c) 2019 Atmosphere-NX
+Copyright (c) 2026 slankka and contributors
+
+Atmosphère: https://github.com/Atmosphere-NX/Atmosphere
+
+The combined work is distributed under GNU GPL version 2 only. See LICENSE.
+
+Development was assisted by generative AI. All resulting code included in the
+project was directed, reviewed, modified as needed, tested, and approved by the
+maintainer. Generative AI is not an author or copyright holder.
