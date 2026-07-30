@@ -29,6 +29,8 @@ static Handle self_proc_handle;
 static char inner_heap[INNER_HEAP_SIZE];
 static const FsCodecvtOffsets *fs_offs;
 
+static constexpr u32 NOP = 0xD503201F;
+
 extern "C" void __initheap(void) {
     extern char *fake_heap_start, *fake_heap_end;
     fake_heap_start = inner_heap;
@@ -57,6 +59,7 @@ static bool encode_b_cond(uintptr_t source, uintptr_t target, u32 condition, u32
 }
 
 static void w32(uintptr_t a, u32 v) { *(u32*)(fs_rw_mapping+(a-fs_code_base)) = v; }
+static void nop(uintptr_t a) { w32(a, NOP); }
 
 static void recv_thread(void *arg) {
     Handle h = *(Handle*)arg;
@@ -97,9 +100,8 @@ static bool map_fs(void) {
 static void unmap(void){if(fs_rw_mapping){svcUnmapProcessMemory(fs_rw_mapping,self_proc_handle,fs_code_base,fs_code_size);fs_rw_mapping=0;}}
 
 static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffsets *o) {
-    if (!o->codecvt[0] || !o->codecvt[3] ||
-        !o->path_from_unicode || !o->path_in_unicode ||
-        !o->pattern_next_char || !o->parse_shortname_entry ||
+    if (!o->codecvt[0] || !o->codecvt[1] || !o->codecvt[2] ||
+        !o->codecvt[3] || !o->codecvt[4] || !o->codecvt[5] ||
         !o->dir_hook || !o->dir_reject || !o->dir_ascii_checks ||
         !o->dir_scan_continue || !o->cave || !o->cave_size) {
         return false;
@@ -110,30 +112,11 @@ static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffs
     }
     if (o->dir_hook && o->dir_hook + sizeof(u32) > max_offset) max_offset = o->dir_hook + sizeof(u32);
     if (o->dir_hook && o->cave + o->cave_size > max_offset) max_offset = o->cave + o->cave_size;
-    if (o->path_from_unicode && o->path_from_unicode + sizeof(u32) > max_offset) max_offset = o->path_from_unicode + sizeof(u32);
-    if (o->path_in_unicode && o->path_in_unicode + sizeof(u32) > max_offset) max_offset = o->path_in_unicode + sizeof(u32);
-    if (o->pattern_next_char && o->pattern_next_char + sizeof(u32) > max_offset) max_offset = o->pattern_next_char + sizeof(u32);
-    for (const auto &check : o->identity_checks) {
-        if (check.offset && check.offset + sizeof(u32) > max_offset) {
-            max_offset = check.offset + sizeof(u32);
-        }
-    }
-    if (o->parse_shortname_entry && o->parse_shortname_entry + sizeof(u32) > max_offset) max_offset = o->parse_shortname_entry + sizeof(u32);
     const uintptr_t last = base + max_offset;
     if (last < base || last > region_end) return false;
     const volatile u32 *entry = reinterpret_cast<const volatile u32 *>(base + o->codecvt[0]);
     if (entry[0] != o->codecvt_entry[0] || entry[1] != o->codecvt_entry[1]) return false;
     if (o->dir_hook && *reinterpret_cast<const volatile u32 *>(base + o->dir_hook) != o->dir_hook_opcode) return false;
-    if (o->path_from_unicode && *reinterpret_cast<const volatile u32 *>(base + o->path_from_unicode) != o->path_from_entry) return false;
-    if (o->path_in_unicode && *reinterpret_cast<const volatile u32 *>(base + o->path_in_unicode) != o->path_in_entry) return false;
-    if (o->pattern_next_char && *reinterpret_cast<const volatile u32 *>(base + o->pattern_next_char) != o->pattern_entry) return false;
-    for (const auto &check : o->identity_checks) {
-        if (check.offset &&
-            *reinterpret_cast<const volatile u32 *>(base + check.offset) != check.opcode) {
-            return false;
-        }
-    }
-    if (o->parse_shortname_entry && *reinterpret_cast<const volatile u32 *>(base + o->parse_shortname_entry) != o->parse_shortname_entry_opcode) return false;
     for (int i = 0; i < 3; ++i) {
         if (o->sanitize[i] == 0) continue;
         const u32 op = *reinterpret_cast<const volatile u32 *>(base + o->sanitize[i]);
@@ -166,41 +149,26 @@ static s32 find_fs(uintptr_t region_end) {
 
 static bool install(void) {
     const FsCodecvtOffsets *o = fs_offs;
-    if (!o->codecvt[0] || !o->codecvt[3] ||
-        !o->path_from_unicode || !o->path_in_unicode ||
-        !o->pattern_next_char || !o->parse_shortname_entry ||
+    if (!o->codecvt[0] || !o->codecvt[1] || !o->codecvt[2] ||
+        !o->codecvt[3] || !o->codecvt[4] || !o->codecvt[5] ||
         !o->dir_hook || !o->dir_reject || !o->dir_ascii_checks ||
         !o->dir_scan_continue || !o->cave || !o->cave_size) {
         return false;
     }
 
-    /* The legacy PF_CHARCODE path may provide only a two-byte temporary.
-     * Hook only OEM->Unicode and byte classification at this layer. */
-    u32 oem2unicode_hook, is_oem_mb_hook;
-    if (!encode_b(fs_code_base + o->codecvt[0],
-                  reinterpret_cast<uintptr_t>(&oem2unicode_dbcs_safe),
-                  &oem2unicode_hook)) return false;
-    if (!encode_b(fs_code_base + o->codecvt[3],
-                  reinterpret_cast<uintptr_t>(&is_oem_mb_utf8),
-                  &is_oem_mb_hook)) return false;
-
-    /* These entry points receive complete strings and can safely perform
-     * full UTF-8 conversion. */
-    u32 path_from_hook, path_in_hook, pattern_next_hook;
-    if (!encode_b(fs_code_base + o->path_from_unicode,
-                  reinterpret_cast<uintptr_t>(&transform_from_unicode_to_normal_utf8),
-                  &path_from_hook)) return false;
-    if (!encode_b(fs_code_base + o->path_in_unicode,
-                  reinterpret_cast<uintptr_t>(&transform_in_unicode_utf8),
-                  &path_in_hook)) return false;
-    if (!encode_b(fs_code_base + o->pattern_next_char,
-                  reinterpret_cast<uintptr_t>(&get_next_char_of_pattern_utf8),
-                  &pattern_next_hook)) return false;
-
-    u32 parse_shortname_hook;
-    if (!encode_b(fs_code_base + o->parse_shortname_entry,
-                  reinterpret_cast<uintptr_t>(&parse_short_name_utf8_fat),
-                  &parse_shortname_hook)) return false;
+    const uintptr_t codecvt_targets[6] = {
+        reinterpret_cast<uintptr_t>(&oem2unicode_utf8),
+        reinterpret_cast<uintptr_t>(&unicode2oem_utf8),
+        reinterpret_cast<uintptr_t>(&oem_char_width_utf8),
+        reinterpret_cast<uintptr_t>(&is_oem_mb_utf8),
+        reinterpret_cast<uintptr_t>(&unicode_char_width_utf8),
+        reinterpret_cast<uintptr_t>(&is_unicode_mb_utf8),
+    };
+    u32 codecvt_hooks[6];
+    for (int i = 0; i < 6; ++i) {
+        if (!encode_b(fs_code_base + o->codecvt[i], codecvt_targets[i],
+                      &codecvt_hooks[i])) return false;
+    }
 
     /* The hook is in the middle of Directory::Read, not at an ABI
      * function boundary. Preserve every live caller-saved register except X8,
@@ -244,12 +212,12 @@ static bool install(void) {
         w32(fs_code_base + o->dir_hook, dir_hook);
     }
 
-    w32(fs_code_base + o->codecvt[0], oem2unicode_hook);
-    w32(fs_code_base + o->codecvt[3], is_oem_mb_hook);
-    w32(fs_code_base + o->path_from_unicode, path_from_hook);
-    w32(fs_code_base + o->path_in_unicode, path_in_hook);
-    w32(fs_code_base + o->pattern_next_char, pattern_next_hook);
-    w32(fs_code_base + o->parse_shortname_entry, parse_shortname_hook);
+    for (int i = 0; i < 6; ++i) {
+        w32(fs_code_base + o->codecvt[i], codecvt_hooks[i]);
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (o->sanitize[i]) nop(fs_code_base + o->sanitize[i]);
+    }
     return true;
 }
 

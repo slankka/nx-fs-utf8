@@ -27,10 +27,7 @@ enum FsVersion : u32 {
     FsVer_22_0_0_Exfat  = 3,
     FsVer_22_5_0_Exfat  = 4,
 
-    /* FAT32 variants */
-    FsVer_19_0_0_Fat32  = 5,
-
-    FsVer_Count         = 6,
+    FsVer_Count         = 5,
 };
 
 struct FsOpcodeCheck {
