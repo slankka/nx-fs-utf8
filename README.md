@@ -1,6 +1,6 @@
-# nx_fscodecvt
+# nx-fs-utf8
 
-`nx_fscodecvt` is an independently buildable FS Overlay KIP that adds UTF-8
+`nx-fs-utf8` is an independently buildable FS Overlay KIP that adds UTF-8
 filename compatibility to the Nintendo Switch FS sysmodule. It is designed to
 be prepended to FS by a compatible Fusee or Hekate FS Overlay loader.
 
@@ -19,7 +19,7 @@ Both components therefore execute inside the same FS process and address
 space. In that practical sense, `fs_codecvt` is layered over, or prepended to,
 the original FS image.
 
-This terminology is local to the `nx_fscodecvt` project. **FS Overlay is not
+This terminology is local to the `nx-fs-utf8` project. **FS Overlay is not
 claimed to be an official Atmosphère feature name, file format, or public API.**
 Atmosphère may describe comparable image-merging or emuMMC injection behavior
 using different terms, and its maintainers may not agree with or adopt the
@@ -141,7 +141,7 @@ This project is licensed under the GNU General Public License version 2 only
 The KIP startup/runtime framework is derived from the Atmosphère emuMMC design.
 Copyright and attribution for upstream-derived portions remain with m4xw and
 Atmosphere-NX. UTF-8 codec conversion, FS discovery, validation, and hook logic
-are maintained by the `nx_fscodecvt` project.
+are maintained by the `nx-fs-utf8` project.
 
 Development was assisted by generative AI. The maintainer directed, reviewed,
 modified, tested, and approved the resulting code. The AI tool is not an author
