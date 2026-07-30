@@ -1,4 +1,4 @@
-nx_fscodecvt contains startup and low-level runtime code derived from the
+nx-fs-utf8 contains startup and low-level runtime code derived from the
 Atmosphère emuMMC project.
 
 Copyright (c) 2019 m4xw
