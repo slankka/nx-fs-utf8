@@ -68,6 +68,24 @@ Clean generated files with:
 make clean
 ```
 
+## Test program
+
+[`test_program`](test_program) contains the libnx homebrew program used to
+verify CJK filename round trips on hardware. It creates and reads
+`sdmc:/ROM/中文目录/往返测试.txt`, then verifies that both Chinese names appear
+through directory enumeration. This test client is separate from the Overlay
+KIP and is launched through the Homebrew Menu.
+
+Build it with devkitPro:
+
+```sh
+cd test_program
+./build.sh
+```
+
+See [`test_program/README.md`](test_program/README.md) for Windows build steps,
+controls, expected results, and the SD-card write warning.
+
 ## Deployment
 
 This KIP must be loaded through an FS Overlay mechanism. For Hekate, use only
