@@ -1,0 +1,15 @@
+* text=auto
+
+Makefile text eol=lf
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.ld text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.s text eol=lf
+*.specs text eol=lf
+LICENSE text eol=lf
+NOTICE text eol=lf
+COPYRIGHT text eol=lf
