@@ -158,6 +158,17 @@ pf_s32 unicode2oem_utf8(const pf_u16* src, pf_s8* dst) {
     return (3 << 16) | 2;
 }
 
+/* === (3) OEM character width === */
+
+pf_s32 oem_char_width_utf8(const pf_s8* src) {
+    const pf_u8 b0 = static_cast<pf_u8>(src[0]);
+    if (b0 < 0x80) return 1;
+    if (b0 < 0xC0) return 1;
+    if (b0 < 0xE0) return 2;
+    if (b0 < 0xF0) return 3;
+    return 4;
+}
+
 /* === Is OEM multi-byte character ===
  *
  * num == 1: is this a UTF-8 lead byte? (≥ 0xC0)
@@ -173,6 +184,16 @@ pf_bool is_oem_mb_utf8(pf_s8 src, int num) {
     if (num == 2) {
         return (b & 0xC0) == 0x80;
     }
+    return PF_FALSE;
+}
+
+/* === (5) Unicode character width / (6) Unicode multibyte flag === */
+
+pf_s32 unicode_char_width_utf8(const pf_u16* /*src*/) {
+    return 2;
+}
+
+pf_bool is_unicode_mb_utf8(pf_u16 /*src*/, pf_bool /*num*/) {
     return PF_FALSE;
 }
 

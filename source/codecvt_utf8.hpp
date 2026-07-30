@@ -42,9 +42,18 @@ pf_s32 oem2unicode_dbcs_safe(const pf_s8* src, pf_u16* dst);
  *     Returns (oem_width << 16) | uni_width */
 pf_s32 unicode2oem_utf8(const pf_u16* src, pf_s8* dst);
 
+/* (3) OEM char width: byte width of a UTF-8 sequence from first byte. */
+pf_s32 oem_char_width_utf8(const pf_s8* src);
+
 /* Is OEM multi-byte: lead byte detection / continuation byte detection.
  *     Note: num is 1 or 2 (passed as integer despite pf_bool in struct). */
 pf_bool is_oem_mb_utf8(pf_s8 src, int num);
+
+/* (5) Unicode char width: always 2 for BMP. */
+pf_s32 unicode_char_width_utf8(const pf_u16* src);
+
+/* (6) Is Unicode multi-byte: always false for BMP. */
+pf_bool is_unicode_mb_utf8(pf_u16 src, pf_bool num);
 
 /* High-level PrFILE2 path converters. Unlike the PF_CHARCODE callbacks,
  * these are only called with complete NUL-terminated strings. */

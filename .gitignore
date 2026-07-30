@@ -1,6 +1,8 @@
 /build/
 /fs_codecvt.elf
 /fs_codecvt_unpacked.kip
+/fs_codecvt_exfat.elf
+/fs_codecvt_exfat_unpacked.kip
 *.map
 *.lst
 __pycache__/
