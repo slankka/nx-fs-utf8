@@ -100,8 +100,13 @@ static bool map_fs(void) {
 static void unmap(void){if(fs_rw_mapping){svcUnmapProcessMemory(fs_rw_mapping,self_proc_handle,fs_code_base,fs_code_size);fs_rw_mapping=0;}}
 
 static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffsets *o) {
+    /* Dual FAT32/exFAT contract: require the full six-slot PF_CHARCODE table
+     * (exFAT driver path) AND the high-level path-transform/SFN entries
+     * (FAT32/PrFILE2-VF driver path) together with the dir output hook. */
     if (!o->codecvt[0] || !o->codecvt[1] || !o->codecvt[2] ||
         !o->codecvt[3] || !o->codecvt[4] || !o->codecvt[5] ||
+        !o->path_from_unicode || !o->path_in_unicode ||
+        !o->pattern_next_char || !o->parse_shortname_entry ||
         !o->dir_hook || !o->dir_reject || !o->dir_ascii_checks ||
         !o->dir_scan_continue || !o->cave || !o->cave_size) {
         return false;
@@ -112,11 +117,30 @@ static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffs
     }
     if (o->dir_hook && o->dir_hook + sizeof(u32) > max_offset) max_offset = o->dir_hook + sizeof(u32);
     if (o->dir_hook && o->cave + o->cave_size > max_offset) max_offset = o->cave + o->cave_size;
+    if (o->path_from_unicode && o->path_from_unicode + sizeof(u32) > max_offset) max_offset = o->path_from_unicode + sizeof(u32);
+    if (o->path_in_unicode && o->path_in_unicode + sizeof(u32) > max_offset) max_offset = o->path_in_unicode + sizeof(u32);
+    if (o->pattern_next_char && o->pattern_next_char + sizeof(u32) > max_offset) max_offset = o->pattern_next_char + sizeof(u32);
+    for (const auto &check : o->identity_checks) {
+        if (check.offset && check.offset + sizeof(u32) > max_offset) {
+            max_offset = check.offset + sizeof(u32);
+        }
+    }
+    if (o->parse_shortname_entry && o->parse_shortname_entry + sizeof(u32) > max_offset) max_offset = o->parse_shortname_entry + sizeof(u32);
     const uintptr_t last = base + max_offset;
     if (last < base || last > region_end) return false;
     const volatile u32 *entry = reinterpret_cast<const volatile u32 *>(base + o->codecvt[0]);
     if (entry[0] != o->codecvt_entry[0] || entry[1] != o->codecvt_entry[1]) return false;
     if (o->dir_hook && *reinterpret_cast<const volatile u32 *>(base + o->dir_hook) != o->dir_hook_opcode) return false;
+    if (o->path_from_unicode && *reinterpret_cast<const volatile u32 *>(base + o->path_from_unicode) != o->path_from_entry) return false;
+    if (o->path_in_unicode && *reinterpret_cast<const volatile u32 *>(base + o->path_in_unicode) != o->path_in_entry) return false;
+    if (o->pattern_next_char && *reinterpret_cast<const volatile u32 *>(base + o->pattern_next_char) != o->pattern_entry) return false;
+    for (const auto &check : o->identity_checks) {
+        if (check.offset &&
+            *reinterpret_cast<const volatile u32 *>(base + check.offset) != check.opcode) {
+            return false;
+        }
+    }
+    if (o->parse_shortname_entry && *reinterpret_cast<const volatile u32 *>(base + o->parse_shortname_entry) != o->parse_shortname_entry_opcode) return false;
     for (int i = 0; i < 3; ++i) {
         if (o->sanitize[i] == 0) continue;
         const u32 op = *reinterpret_cast<const volatile u32 *>(base + o->sanitize[i]);
@@ -151,13 +175,25 @@ static bool install(void) {
     const FsCodecvtOffsets *o = fs_offs;
     if (!o->codecvt[0] || !o->codecvt[1] || !o->codecvt[2] ||
         !o->codecvt[3] || !o->codecvt[4] || !o->codecvt[5] ||
+        !o->path_from_unicode || !o->path_in_unicode ||
+        !o->pattern_next_char || !o->parse_shortname_entry ||
         !o->dir_hook || !o->dir_reject || !o->dir_ascii_checks ||
         !o->dir_scan_continue || !o->cave || !o->cave_size) {
         return false;
     }
 
+    /* Dual FAT32/exFAT contract:
+     *  - All six PF_CHARCODE slots are replaced so the exFAT driver path has a
+     *    self-consistent UTF-8 codecvt (the FAT32 path only exercises slot0/
+     *    slot3 for byte-level scanning and is safe with the bounded decoder).
+     *  - slot0 uses the DBCS-safe bounded decoder so FAT32's two-byte
+     *    temporary buffers are never over-read (full 3-byte read = black
+     *    screen on the FAT path).  Complete-string conversion on both media
+     *    is handled losslessly by the high-level path hooks below.
+     *  - The high-level path-transform + FAT32 SFN hooks are dormant on the
+     *    exFAT driver path and required on the FAT32/PrFILE2-VF path. */
     const uintptr_t codecvt_targets[6] = {
-        reinterpret_cast<uintptr_t>(&oem2unicode_utf8),
+        reinterpret_cast<uintptr_t>(&oem2unicode_dbcs_safe),
         reinterpret_cast<uintptr_t>(&unicode2oem_utf8),
         reinterpret_cast<uintptr_t>(&oem_char_width_utf8),
         reinterpret_cast<uintptr_t>(&is_oem_mb_utf8),
@@ -169,6 +205,23 @@ static bool install(void) {
         if (!encode_b(fs_code_base + o->codecvt[i], codecvt_targets[i],
                       &codecvt_hooks[i])) return false;
     }
+
+    /* High-level complete-string converters (FAT32/PrFILE2-VF driver path).
+     * These receive full NUL-terminated strings and perform lossless UTF-8
+     * conversion; on the exFAT driver path they are harmless dormant hooks. */
+    u32 path_from_hook, path_in_hook, pattern_next_hook, parse_shortname_hook;
+    if (!encode_b(fs_code_base + o->path_from_unicode,
+                  reinterpret_cast<uintptr_t>(&transform_from_unicode_to_normal_utf8),
+                  &path_from_hook)) return false;
+    if (!encode_b(fs_code_base + o->path_in_unicode,
+                  reinterpret_cast<uintptr_t>(&transform_in_unicode_utf8),
+                  &path_in_hook)) return false;
+    if (!encode_b(fs_code_base + o->pattern_next_char,
+                  reinterpret_cast<uintptr_t>(&get_next_char_of_pattern_utf8),
+                  &pattern_next_hook)) return false;
+    if (!encode_b(fs_code_base + o->parse_shortname_entry,
+                  reinterpret_cast<uintptr_t>(&parse_short_name_utf8_fat),
+                  &parse_shortname_hook)) return false;
 
     /* The hook is in the middle of Directory::Read, not at an ABI
      * function boundary. Preserve every live caller-saved register except X8,
@@ -215,6 +268,10 @@ static bool install(void) {
     for (int i = 0; i < 6; ++i) {
         w32(fs_code_base + o->codecvt[i], codecvt_hooks[i]);
     }
+    w32(fs_code_base + o->path_from_unicode, path_from_hook);
+    w32(fs_code_base + o->path_in_unicode, path_in_hook);
+    w32(fs_code_base + o->pattern_next_char, pattern_next_hook);
+    w32(fs_code_base + o->parse_shortname_entry, parse_shortname_hook);
     for (int i = 0; i < 3; ++i) {
         if (o->sanitize[i]) nop(fs_code_base + o->sanitize[i]);
     }
