@@ -48,10 +48,11 @@ extern "C" void fs_codecvt_note_exfat_path(void) {
     g_fat_path = 0;
 }
 
-/* F51 slot0 dispatch: FAT32 -> bounded (2-byte safe) decoder; exFAT -> full
- * three-byte decoder (F50: full 3-byte is the exFAT fix). */
+/* F59 (no-dispatch): slot0 ALWAYS full three-byte UTF-8 decoder.
+ * exFAT fix (F50); FAT32 safe per PrFILE2 source (all oem2unicode call sites
+ * output a single u16 into a caller buffer, no constrained temp). */
 static pf_s32 oem2unicode_dual(const pf_s8* src, pf_u16* dst) {
-    return g_fat_path ? oem2unicode_dbcs_safe(src, dst) : oem2unicode_utf8(src, dst);
+    return oem2unicode_utf8(src, dst);
 }
 
 /* F51 slot1 dispatch.  The FAT32/PrFILE2 path calls unicode2oem with several
@@ -81,8 +82,13 @@ static pf_s32 unicode2oem_bounded_utf8(const pf_u16* src, pf_s8* dst) {
     return (3 << 16) | 2;
 }
 
+/* F59 (no-dispatch): slot1 ALWAYS bounded (<=2 byte) UTF-8 encoder.
+ * FAT32 fix (F51): PrFILE2 has 3 strict 2-byte DBCS temps
+ * (OEM_ConvertFWchar / GetNextCharOfPattern / GetLengthFromUnicode) — a
+ * 3-byte CJK write would smash the stack (FAT32 black-screen root cause).
+ * exFAT must be verified: bounded truncates 3-byte CJK to 2 bytes. */
 static pf_s32 unicode2oem_dual(const pf_u16* src, pf_s8* dst) {
-    return g_fat_path ? unicode2oem_bounded_utf8(src, dst) : unicode2oem_utf8(src, dst);
+    return unicode2oem_bounded_utf8(src, dst);
 }
 
 static constexpr u32 NOP = 0xD503201F;
@@ -351,26 +357,11 @@ static bool install(void) {
      * any user path operation (FAT32 mounts via the independent PrFILE
      * driver; the VBR check rejects non-exFAT before this runs).  Probe it to
      * latch g_fat_path=0 so the slot0/slot1 dispatchers pick full UTF-8. */
-    if (o->exfat_mount_entry && o->exfat_cave) {
-        const uintptr_t pc0 = fs_code_base + o->exfat_cave;
-        const uintptr_t gp  = reinterpret_cast<uintptr_t>(&g_fat_path);
-        u32 probe[6]; int pi = 0; u32 op;
-        if (!encode_adrp(pc0, gp & ~0xFFFu, &op, 16)) return false; probe[pi++] = op;
-        probe[pi++] = encode_add_imm12(16, 16, static_cast<u32>(gp & 0xFFF));
-        /* F58-DIAG (REVERSED probe): write g_fat_path = 1 instead of 0.
-         * With default g_fat_path=0 (F57 base):
-         *   - probe NOT executing -> stays 0 (full)  -> 3 PASS (exFAT)
-         *   - probe executing     -> flips to 1 (bounded) -> FAIL PASS FAIL
-         * This detects whether the anchor probe actually runs on 20.2.0. */
-        probe[pi++] = 0x52800031;             /* mov w17, #1 */
-        probe[pi++] = 0xB9000211;             /* str w17, [x16] -> g_fat_path = 1 (REVERSED) */
-        probe[pi++] = o->exfat_mount_opcode;  /* replicate original instr1 (sub sp) */
-        if (!encode_b(pc0 + pi * 4, fs_code_base + o->exfat_mount_entry + 4, &op)) return false;
-        probe[pi++] = op;                     /* b entry+4: continue original body */
-        for (int i = 0; i < pi; ++i) w32(pc0 + i * 4, probe[i]);
-        if (!encode_b(fs_code_base + o->exfat_mount_entry, pc0, &op)) return false;
-        w32(fs_code_base + o->exfat_mount_entry, op);
-    }
+    /* F59: anchor-probe approach dropped. PrFILE2 source shows the codeset
+     * global (VFipf_vol_set.codeset) is CP932 and NEVER changes (p_setcode is
+     * called only from InitModule), so an exFAT mount cannot flip it and the
+     * 0x0ED980-style anchor never fired on 20.2.0.  Instead the dispatcher is
+     * now fixed (slot0 full / slot1 bounded) with no media signal at all. */
     return true;
 }
 
