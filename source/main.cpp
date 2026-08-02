@@ -357,7 +357,13 @@ static bool install(void) {
         u32 probe[6]; int pi = 0; u32 op;
         if (!encode_adrp(pc0, gp & ~0xFFFu, &op, 16)) return false; probe[pi++] = op;
         probe[pi++] = encode_add_imm12(16, 16, static_cast<u32>(gp & 0xFFF));
-        probe[pi++] = 0xB900021F;             /* str wzr, [x16] -> g_fat_path = 0 */
+        /* F58-DIAG (REVERSED probe): write g_fat_path = 1 instead of 0.
+         * With default g_fat_path=0 (F57 base):
+         *   - probe NOT executing -> stays 0 (full)  -> 3 PASS (exFAT)
+         *   - probe executing     -> flips to 1 (bounded) -> FAIL PASS FAIL
+         * This detects whether the anchor probe actually runs on 20.2.0. */
+        probe[pi++] = 0x52800031;             /* mov w17, #1 */
+        probe[pi++] = 0xB9000211;             /* str w17, [x16] -> g_fat_path = 1 (REVERSED) */
         probe[pi++] = o->exfat_mount_opcode;  /* replicate original instr1 (sub sp) */
         if (!encode_b(pc0 + pi * 4, fs_code_base + o->exfat_mount_entry + 4, &op)) return false;
         probe[pi++] = op;                     /* b entry+4: continue original body */
