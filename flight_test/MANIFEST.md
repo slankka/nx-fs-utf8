@@ -51,6 +51,19 @@ PASS 证明 dir hook 不是差异化因素。
 - **待接入**：exFAT 专属锚点（定位 exFAT 挂载/检测函数后调 `fs_codecvt_note_exfat_path()` 置 0），
   完成后 F53+锚点 = 双介质 dual（FAT32 3P + exFAT 3P）。
 
+| 55 | `1A374E1E` | **F55 锚点集成**：在 F53 基座上 hook **exFAT 引导区校验和函数**（19.0.1 @`0x0E2BA0`，`ams-reverse-engineering-agent` 交付，唯一调用点 `0x0FE690`⊂exFAT 挂载 `0x0FE550`）→ 探针（0xFED00 死区）置 `g_fat_path=0` → slot0/slot1 全量 UTF-8 | 🧪 待真机（双介质） |
+
+- F55 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
+- SHA-256 完整：`1A374E1E128BBF23866A5BD1455F922205AB9A9AD1A9F3A131D498078F05480B`
+- 大小：0x2AC8 = 10952B；flags=0x78；bss_end=0x8000 对齐。加载器校验通过。
+- **锚点语义**（已验证）：exFAT VBR 校验通过后才执行（FAT32 走独立 PrFILE 驱动，VBR 校验把关），
+  挂载期早于任何路径操作；函数体 0x340B 在 FAT32-only 二进制中不存在（最强证据）。
+- **⚠️ 多卷风险**：锚点对**任意 exFAT 卷**触发。若 eMMC USER 分区是 exFAT 且先于 SD 挂载，
+  会把 `g_fat_path` 置 0 → FAT32 SD 操作可能用全量越界（黑屏/FAIL）。F55 双介质测试将揭示：
+  - exFAT SD：预期 **3 PASS**（SD exFAT 挂载触发锚点）
+  - FAT32 SD：若 eMMC USER 为 FAT32/其他 → 3 PASS；若为 exFAT → 可能回归（此时需把锚点限定到 SD 卷）
+- **多版本**：20.5.0=`0x0EDA80`、21.2.0=`0x0F3210`、22.0/22.5=`0x0F59C0`（cave 待补，本次仅 19.0.1 启用）
+
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
 - 大小：0x284C = 10316B；flags@0x1F=`0x78`；bss_end=0x8000 对齐。加载器校验通过。

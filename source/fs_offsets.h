@@ -68,6 +68,13 @@ struct FsCodecvtOffsets {
     FsOpcodeCheck identity_checks[6]; /* additional exact-image guards */
     u32 parse_shortname_entry;  /* VFiPFPATH_parseShortName entry */
     u32 parse_shortname_entry_opcode; /* exact original prologue */
+    u32 exfat_mount_entry;   /* exFAT boot-checksum verify fn entry (anchor).
+                              * Fires ONLY on the exFAT mount success path
+                              * (ams-reverse-engineering-agent, fw19.0.1:
+                              * 0x0E2BA0).  Set to fs_codecvt_note_exfat_path. */
+    u32 exfat_mount_opcode;  /* exact original first instruction (guard) */
+    u32 exfat_cave;          /* writable+executable dead spot for the probe
+                              * machine code (0 = skip anchor hooking) */
 };
 
 /* SHA-256 hash prefix (first 8 bytes) for each supported FS version.

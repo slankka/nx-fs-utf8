@@ -114,6 +114,18 @@ static bool encode_b_cond(uintptr_t source, uintptr_t target, u32 condition, u32
     return true;
 }
 
+static bool encode_adrp(uintptr_t pc, uintptr_t target_page, u32 *out, u32 rd) {
+    const s64 delta = static_cast<s64>(target_page) - static_cast<s64>(pc & ~0xFFFLL);
+    if (delta < -(1LL << 20) || delta >= (1LL << 20)) return false;
+    const u64 imm = static_cast<u64>(delta & 0x1FFFFF);
+    *out = 0x90000000u | ((imm & 0x3) << 29) | (((imm >> 2) & 0x7FFFF) << 5) | (rd & 0x1F);
+    return true;
+}
+
+static u32 encode_add_imm12(u32 rd, u32 rn, u32 imm12) {
+    return 0x91000000u | ((imm12 & 0xFFF) << 10) | (rn << 5) | rd;
+}
+
 static void w32(uintptr_t a, u32 v) { *(u32*)(fs_rw_mapping+(a-fs_code_base)) = v; }
 static void nop(uintptr_t a) { w32(a, NOP); }
 
@@ -182,6 +194,8 @@ static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffs
         }
     }
     if (o->parse_shortname_entry && o->parse_shortname_entry + sizeof(u32) > max_offset) max_offset = o->parse_shortname_entry + sizeof(u32);
+    if (o->exfat_mount_entry && o->exfat_mount_entry + sizeof(u32) > max_offset) max_offset = o->exfat_mount_entry + sizeof(u32);
+    if (o->exfat_cave && o->exfat_cave + 0x20 > max_offset) max_offset = o->exfat_cave + 0x20;
     const uintptr_t last = base + max_offset;
     if (last < base || last > region_end) return false;
     const volatile u32 *entry = reinterpret_cast<const volatile u32 *>(base + o->codecvt[0]);
@@ -197,6 +211,8 @@ static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffs
         }
     }
     if (o->parse_shortname_entry && *reinterpret_cast<const volatile u32 *>(base + o->parse_shortname_entry) != o->parse_shortname_entry_opcode) return false;
+    if (o->exfat_mount_entry && o->exfat_mount_opcode &&
+        *reinterpret_cast<const volatile u32 *>(base + o->exfat_mount_entry) != o->exfat_mount_opcode) return false;
     for (int i = 0; i < 3; ++i) {
         if (o->sanitize[i] == 0) continue;
         const u32 op = *reinterpret_cast<const volatile u32 *>(base + o->sanitize[i]);
@@ -328,6 +344,26 @@ static bool install(void) {
     w32(fs_code_base + o->parse_shortname_entry, parse_shortname_hook);
     for (int i = 0; i < 3; ++i) {
         if (o->sanitize[i]) nop(fs_code_base + o->sanitize[i]);
+    }
+
+    /* F55: exFAT mount anchor.  The exFAT boot-checksum verify function
+     * (0x0E2BA0 on 19.0.1) runs ONLY on the exFAT mount success path, before
+     * any user path operation (FAT32 mounts via the independent PrFILE
+     * driver; the VBR check rejects non-exFAT before this runs).  Probe it to
+     * latch g_fat_path=0 so the slot0/slot1 dispatchers pick full UTF-8. */
+    if (o->exfat_mount_entry && o->exfat_cave) {
+        const uintptr_t pc0 = fs_code_base + o->exfat_cave;
+        const uintptr_t gp  = reinterpret_cast<uintptr_t>(&g_fat_path);
+        u32 probe[6]; int pi = 0; u32 op;
+        if (!encode_adrp(pc0, gp & ~0xFFFu, &op, 16)) return false; probe[pi++] = op;
+        probe[pi++] = encode_add_imm12(16, 16, static_cast<u32>(gp & 0xFFF));
+        probe[pi++] = 0xB900021F;             /* str wzr, [x16] -> g_fat_path = 0 */
+        probe[pi++] = o->exfat_mount_opcode;  /* replicate original instr1 (sub sp) */
+        if (!encode_b(pc0 + pi * 4, fs_code_base + o->exfat_mount_entry + 4, &op)) return false;
+        probe[pi++] = op;                     /* b entry+4: continue original body */
+        for (int i = 0; i < pi; ++i) w32(pc0 + i * 4, probe[i]);
+        if (!encode_b(fs_code_base + o->exfat_mount_entry, pc0, &op)) return false;
+        w32(fs_code_base + o->exfat_mount_entry, op);
     }
     return true;
 }
