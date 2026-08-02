@@ -7,3 +7,4 @@
 *.lst
 __pycache__/
 *.pyc
+/.agent/
