@@ -16,13 +16,19 @@ PASS 证明 dir hook 不是差异化因素。
 
 | # | SHA256 | 变更 | 结果 |
 |---|--------|------|------|
-| 49 | `B053C59A` | `install()` 装**并集**：六槽全 hook（slot0=`oem2unicode_dbcs_safe` 两字节安全保持 FAT32 安全）+ slot1/2/4/5 + path-transform + parseShortName + dir + sanitize NOP；`matches_fs` 严格要求六槽+path+SFN+dir+identity_checks | 🧪 待真机 |
+| 49 | `B053C59A` | `install()` 装**并集**：六槽全 hook（slot0=`oem2unicode_dbcs_safe` 两字节安全保持 FAT32 安全）+ slot1/2/4/5 + path-transform + parseShortName + dir + sanitize NOP；`matches_fs` 严格要求六槽+path+SFN+dir+identity_checks | ❌ exFAT：FAIL PASS FAIL，目录重复创建（与 D69657FD 相同） |
 
-- 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
-- SHA-256 完整：`B053C59A186E3D0FD06702AEEAC739DD547942AFD3B51FEE24B3B523A90CDA3A`
-- KIP1 flags@0x1F=`0x78`（未压缩，与 D69657FD 相同）；三段之和+0x100 == 0x28BC == 文件大小；
-  bss_end=0x8000 对齐。加载器校验通过。
-- 大小：10428B（text=0x1C00 ro=0xAE4 data=0xD8 bss=0x4000）
+> **F49 结论**：F49 新增的 slot1/2/4/5 + sanitize NOP 在 exFAT 上无任何效果（结果与
+> D69657FD 逐项相同），证明 exFAT 失败路径由 **slot0 两字节有损解码**驱动：exFAT 驱动
+> 路径依赖 slot0 做完整三字节 CJK 解码，有损后建名不匹配 → 重复创建。
+
+| 50 | `63FCE7FF` | F49 基础上 **slot0 换回完整三字节 `oem2unicode_utf8`**（其余并集不变：slot1/2/4/5 + path-transform + SFN + dir + sanitize NOP） | 🧪 待真机 |
+
+- F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
+- SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
+- 大小：0x284C = 10316B；flags@0x1F=`0x78`；bss_end=0x8000 对齐。加载器校验通过。
+- **预期**：exFAT 上等价于已验证的 exFAT 六槽 KIP（slot0=完整三字节）→ 3 PASS；
+  **FAT32 上预计黑屏**（完整三字节重犯 FAT 两字节临时缓冲越界，F16/F24/F28）——这正用于确认 slot0 冲突，随后做 LR 分发（F51）。
 
 ## 预期
 

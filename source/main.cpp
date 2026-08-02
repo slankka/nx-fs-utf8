@@ -182,18 +182,18 @@ static bool install(void) {
         return false;
     }
 
-    /* Dual FAT32/exFAT contract:
-     *  - All six PF_CHARCODE slots are replaced so the exFAT driver path has a
-     *    self-consistent UTF-8 codecvt (the FAT32 path only exercises slot0/
-     *    slot3 for byte-level scanning and is safe with the bounded decoder).
-     *  - slot0 uses the DBCS-safe bounded decoder so FAT32's two-byte
-     *    temporary buffers are never over-read (full 3-byte read = black
-     *    screen on the FAT path).  Complete-string conversion on both media
-     *    is handled losslessly by the high-level path hooks below.
-     *  - The high-level path-transform + FAT32 SFN hooks are dormant on the
-     *    exFAT driver path and required on the FAT32/PrFILE2-VF path. */
+    /* F50: slot0 back to the FULL 3-byte decoder.  F49 proved the DBCS-safe
+     * bounded decoder is the exFAT-path culprit (identical FAIL PASS FAIL to
+     * D69657FD even with slots 1/2/4/5 + sanitize NOP added).  The exFAT
+     * driver path relies on slot0 for complete three-byte CJK decoding;
+     * the bounded decoder mangles CJK names -> duplicate directory creation.
+     *
+     * NOTE: this makes the dual KIP exFAT-media-correct but reintroduces the
+     * FAT32 two-byte-temporary over-read risk (black screen).  A permanent
+     * dual must dispatch slot0 by caller (LR) so FAT32 2-byte-temp sites stay
+     * bounded while exFAT call sites decode full 3-byte sequences. */
     const uintptr_t codecvt_targets[6] = {
-        reinterpret_cast<uintptr_t>(&oem2unicode_dbcs_safe),
+        reinterpret_cast<uintptr_t>(&oem2unicode_utf8),
         reinterpret_cast<uintptr_t>(&unicode2oem_utf8),
         reinterpret_cast<uintptr_t>(&oem_char_width_utf8),
         reinterpret_cast<uintptr_t>(&is_oem_mb_utf8),
