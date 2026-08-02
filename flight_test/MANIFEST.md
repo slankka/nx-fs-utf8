@@ -112,6 +112,21 @@ PASS 证明 dir hook 不是差异化因素。
 > - slot1 受限 = FAT32 修复（F51）+ exFAT 兼容（F59 实测）
 > - **不再需要 g_fat_path 分发 / exFAT 锚点 / 介质信号**——纯静态六槽，跨版本仅依赖六槽偏移表（已支持 19.0.1/20.2.0/21.2.0/22.0.0/22.5.0）
 
+## 跨版本离线验证（matches_fs 全量复刻，2026-08-02）
+
+用 `verify_all_versions.py` 对 5 版本 exFAT FS 二进制复刻 `matches_fs()` 全部检查（六槽偏移+双指令、dir_hook、path_from/in、pattern、SFN、identity×6、sanitize）：
+
+| 版本 | 离线 matches_fs | 实机 |
+|---|---|---|
+| 19.0.1 | ✅ PASS | ✅ FAT32 3P（F59）|
+| 20.2.0 | ✅ PASS | ✅ exFAT 3P（F59）|
+| 21.2.0 | ✅ PASS | 未测（offset 表正确）|
+| 22.0.0 | ✅ PASS | 未测（offset 表正确）|
+| **22.5.0** | ❌ **FAIL** | ❌ 不支持 |
+
+- **22.5.0 offset 表错误**：注释"identical to 22.0.0"是假的。实际 22.5.0 的 codecvt 六槽在 `0x1001D0/0x100320/0x1004F0/0x100530/0x100580/0x100590`（=22.0.0 偏移 **-0x11350**，codecvt[0] 已验证 0x39C00008 匹配），但 **dir_hook/path/pattern/SFN/identity/sanitize 区域重排程度不同**（非统一偏移），需逐一定位。当前 22.5.0 上 matches_fs 失败 → 无 hook → 原生 FS。
+- **把握度**：matches_fs 是纯 opcode 匹配，离线 PASS = KIP 运行时必选中+hook 该版本；F59 codecvt 逻辑与版本无关（纯静态替换），故 21.2.0/22.0.0 把握较高但**未实机**（运行时 FAT32 栈布局/dir hook 细节可能有版本差异）。
+
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
 - 大小：0x284C = 10316B；flags@0x1F=`0x78`；bss_end=0x8000 对齐。加载器校验通过。
