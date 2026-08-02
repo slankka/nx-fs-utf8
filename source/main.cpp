@@ -39,7 +39,7 @@ static const FsCodecvtOffsets *fs_offs;
  * latches; an exFAT-only mount anchor (fs_codecvt_note_exfat_path) will flip
  * the flag to 0 once located (delegated RE).  FAT32 = 3P; exFAT currently = 3
  * FAIL until that anchor is wired. */
-static volatile u32 g_fat_path = 1;
+static volatile u32 g_fat_path = 0;  /* F57 A/B test: default 0 = exFAT full UTF-8 (F50-equivalent, no anchor dep). FAT32 will break — exFAT-only test. */
 
 extern "C" void fs_codecvt_note_fat_path(void) {
     g_fat_path = 1;

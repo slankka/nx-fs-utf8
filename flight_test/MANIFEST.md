@@ -74,6 +74,15 @@ PASS 证明 dir hook 不是差异化因素。
 - **F55 遗留 20.2.0 FAIL PASS FAIL 根因**：20.2.0 表 exfat_cave=0 被 install() 跳过 → 锚点未接线 → g_fat_path 保持 1（受限）→ 20.2.0 exFAT 驱动路径走受限 slot0/slot1 → 重复建目录。F56 已接线。
 - **多卷风险同 F55**：锚点对任意 exFAT 卷触发，需双介质实测确认无 eMMC USER exFAT 误触发。
 
+| 57 | `66C47498` | **F57 决定性二分实验**：仅把 `g_fat_path` 默认翻转为 **0**（exFAT 全量 UTF-8，F50 等价，**无锚点依赖**），其余与 F56 完全相同（含 20.2.0 锚点字段，但默认已是 0） | 🧪 待真机（**只测 20.2.0 exFAT**；FAT32 会黑屏勿测） |
+
+- F57 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
+- SHA-256 完整：`66C47498CD20A23F012CDE43E25B8D4095BFDF6DDBC1FEE7A20EFC8A1E021DDA`
+- 大小：0x2AC4 = 10948B；flags=0x78；bss_end=0x8000 对齐。加载器校验通过。
+- **F56 20.2.0 FAIL PASS FAIL 的分支判定**（二选一）：
+  - **若 F57 20.2.0 exFAT = 3 PASS** → 20.2.0 全量 codecvt OK → F56 失败 = **锚点未生效**（g_fat_path 保持 1 受限）→ 查探针写入/地址/触发（F49 受限模式特征 FAIL PASS FAIL 吻合）
+  - **若 F57 20.2.0 exFAT ≠ 3 PASS** → **20.2.0 全量 codecvt 本身有 bug**（20.2.0 从未验证过全量；F50 的 3P 是 19.0.1）→ 查 20.2.0 六槽偏移/调用约定差异
+
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
 - 大小：0x284C = 10316B；flags@0x1F=`0x78`；bss_end=0x8000 对齐。加载器校验通过。
