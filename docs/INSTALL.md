@@ -26,6 +26,7 @@
 ```text
 bootloader/update.bin
 fsoverlays/（整个文件夹）
+sys/emummc.kipm(这个也必须替换，具体原因详见下方仓库)
 atmosphere/reboot_payload.bin
 ```
 
