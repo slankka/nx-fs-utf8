@@ -29,6 +29,61 @@ static Handle self_proc_handle;
 static char inner_heap[INNER_HEAP_SIZE];
 static const FsCodecvtOffsets *fs_offs;
 
+/* === F51 dual medium flag =================================================
+ * g_fat_path: 1 = FAT32/PrFILE2-VF driver path active (slot0/slot1 bounded),
+ *             0 = exFAT driver path active (slot0/slot1 full UTF-8).
+ *
+ * SAFE default = FAT32/bounded: bounded slot0/slot1 never over-read / never
+ * over-write PrFILE2's two-byte DBCS temporaries, so this cannot crash on
+ * either medium.  The FAT32 path latches it to 1 via the high-level path
+ * converters; an exFAT driver-mount anchor (fs_codecvt_note_exfat_path) is
+ * reserved to flip it back to 0 once the exFAT mount is located. */
+static volatile u32 g_fat_path = 1;
+
+extern "C" void fs_codecvt_note_fat_path(void) {
+    g_fat_path = 1;
+}
+extern "C" void fs_codecvt_note_exfat_path(void) {
+    g_fat_path = 0;
+}
+
+/* F51 slot0 dispatch: FAT32 -> bounded (2-byte safe) decoder; exFAT -> full
+ * three-byte decoder (F50: full 3-byte is the exFAT fix). */
+static pf_s32 oem2unicode_dual(const pf_s8* src, pf_u16* dst) {
+    return g_fat_path ? oem2unicode_dbcs_safe(src, dst) : oem2unicode_utf8(src, dst);
+}
+
+/* F51 slot1 dispatch.  The FAT32/PrFILE2 path calls unicode2oem with several
+ * two-byte DBCS temporaries (pf_path.c: OEM_ConvertFWchar/GetNextCharOfPattern/
+ * GetLengthFromUnicode) so the FAT32 side must never write >2 bytes; the
+ * full-buffer site (transformFromUnicodeToNormal) is dead because that routine
+ * is itself replaced by the complete-string path hook.  The exFAT path needs
+ * the full UTF-8 encoder (F50). */
+static pf_s32 unicode2oem_bounded_utf8(const pf_u16* src, pf_s8* dst) {
+    const pf_u16 u = src[0];
+    if (u < 0x80) { /* ASCII: 1 byte + NUL fits a u16 temp */
+        dst[0] = static_cast<pf_s8>(u);
+        dst[1] = 0;
+        return (1 << 16) | 2;
+    }
+    if (u < 0x800) { /* 2-byte UTF-8: 2 bytes + NUL fits a u16 temp */
+        dst[0] = static_cast<pf_s8>(0xC0 | (u >> 6));
+        dst[1] = static_cast<pf_s8>(0x80 | (u & 0x3F));
+        return (2 << 16) | 2;
+    }
+    /* 3-byte UTF-8 cannot fit a two-byte DBCS temporary: write only two bytes
+     * (never overflow) but report the true 3-byte width so length/bound
+     * accounting stays UTF-8-correct.  Byte-level SFN/pattern matching treats
+     * the lead byte like a DBCS lead via is_oem_mb (same classification). */
+    dst[0] = static_cast<pf_s8>(0xE0 | (u >> 12));
+    dst[1] = static_cast<pf_s8>(0x80 | ((u >> 6) & 0x3F));
+    return (3 << 16) | 2;
+}
+
+static pf_s32 unicode2oem_dual(const pf_u16* src, pf_s8* dst) {
+    return g_fat_path ? unicode2oem_bounded_utf8(src, dst) : unicode2oem_utf8(src, dst);
+}
+
 static constexpr u32 NOP = 0xD503201F;
 
 extern "C" void __initheap(void) {
@@ -182,19 +237,17 @@ static bool install(void) {
         return false;
     }
 
-    /* F50: slot0 back to the FULL 3-byte decoder.  F49 proved the DBCS-safe
-     * bounded decoder is the exFAT-path culprit (identical FAIL PASS FAIL to
-     * D69657FD even with slots 1/2/4/5 + sanitize NOP added).  The exFAT
-     * driver path relies on slot0 for complete three-byte CJK decoding;
-     * the bounded decoder mangles CJK names -> duplicate directory creation.
-     *
-     * NOTE: this makes the dual KIP exFAT-media-correct but reintroduces the
-     * FAT32 two-byte-temporary over-read risk (black screen).  A permanent
-     * dual must dispatch slot0 by caller (LR) so FAT32 2-byte-temp sites stay
-     * bounded while exFAT call sites decode full 3-byte sequences. */
+    /* F51 dual medium dispatch: slot0 + slot1 switch on g_fat_path.
+     *  - FAT32 (g_fat_path=1): slot0 = bounded 2-byte-safe decoder, slot1 =
+     *    bounded UTF-8 encoder (never over-writes PrFILE2 two-byte temps).
+     *  - exFAT (g_fat_path=0): slot0 = full 3-byte decoder (F50 fix), slot1 =
+     *    full UTF-8 encoder.
+     *  - slots 2/4/5 stay full UTF-8: their callers pass full strings, so the
+     *    UTF-8 widths/classification are safe on both media.  slot3 stays UTF-8
+     *    byte classification (both validated). */
     const uintptr_t codecvt_targets[6] = {
-        reinterpret_cast<uintptr_t>(&oem2unicode_utf8),
-        reinterpret_cast<uintptr_t>(&unicode2oem_utf8),
+        reinterpret_cast<uintptr_t>(&oem2unicode_dual),
+        reinterpret_cast<uintptr_t>(&unicode2oem_dual),
         reinterpret_cast<uintptr_t>(&oem_char_width_utf8),
         reinterpret_cast<uintptr_t>(&is_oem_mb_utf8),
         reinterpret_cast<uintptr_t>(&unicode_char_width_utf8),

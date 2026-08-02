@@ -60,6 +60,15 @@ pf_bool is_unicode_mb_utf8(pf_u16 src, pf_bool num);
 pf_s32 transform_from_unicode_to_normal_utf8(pf_s8* dst, const pf_u16* src);
 pf_s32 transform_in_unicode_utf8(pf_u16* dst, const pf_s8* src);
 
+/* F51 dual medium flag: the FAT32/PrFILE2-VF driver path (and only that path)
+ * calls the high-level converters below, so entering them is a reliable
+ * "FAT32 path active" signal.  The flag defaults to exFAT/full and is latched
+ * to FAT32/bounded the first time one of these fires on a FAT32 volume. */
+extern "C" void fs_codecvt_note_fat_path(void);
+/* F51: reserved anchor for the exFAT driver mount (sets the flag back to
+ * exFAT/full when an exFAT volume is mounted).  Not yet wired. */
+extern "C" void fs_codecvt_note_exfat_path(void);
+
 struct PfStr64 {
     const pf_s8* head;     /* +0x00 */
     const pf_s8* tail;     /* +0x08 */

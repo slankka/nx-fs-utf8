@@ -29,6 +29,15 @@ PASS 证明 dir hook 不是差异化因素。
 > `unicode2oem`（slot1）存在两字节临时缓冲（`pf_path.c:167 tmp_wc` / `:595 Dest[2]`），
 > FAT32 路径写爆 → 真正 dual 需 slot0+slot1 按介质分发。
 
+| 51 | `07DD6224` | **F51 介质分发**：`g_fat_path` 标志（默认 1=FAT32 受限，安全）驱动 slot0/slot1 分发器——slot0（FAT32=`oem2unicode_dbcs_safe` / exFAT=`oem2unicode_utf8`），slot1（FAT32=`unicode2oem_bounded_utf8` 写≤2B / exFAT=`unicode2oem_utf8`）；FAT32 锁存=4 个 path-transform hook 入口；exFAT 锚点 `fs_codecvt_note_exfat_path` 预留未接线；slot2/4/5 保持全量 UTF-8 | 🧪 待真机 |
+
+- F51 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
+- SHA-256 完整：`07DD6224EDAB021BBA016BB950749EA79C3D325CD2BD2299D13510C0A4220ED8`
+- 大小：0x29C8 = 10696B；flags=0x78；bss_end=0x8000 对齐。加载器校验通过。
+- **预期**：FAT32 = 3 PASS（受限默认+path-transform，验证分发器/受限 slot1/slot2-5 UTF-8/
+sanitize NOP 不破坏 FAT32）；**exFAT = 预计 FAIL**（默认受限，exFAT 锚点未接线——
+exFAT 请继续用 F50 `63FCE7FF`，直到锚点定位后 F52 接通）。
+
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
 - 大小：0x284C = 10316B；flags@0x1F=`0x78`；bss_end=0x8000 对齐。加载器校验通过。
