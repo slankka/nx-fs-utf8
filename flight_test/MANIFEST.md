@@ -83,6 +83,17 @@ PASS 证明 dir hook 不是差异化因素。
   - **若 F57 20.2.0 exFAT = 3 PASS** → 20.2.0 全量 codecvt OK → F56 失败 = **锚点未生效**（g_fat_path 保持 1 受限）→ 查探针写入/地址/触发（F49 受限模式特征 FAIL PASS FAIL 吻合）
   - **若 F57 20.2.0 exFAT ≠ 3 PASS** → **20.2.0 全量 codecvt 本身有 bug**（20.2.0 从未验证过全量；F50 的 3P 是 19.0.1）→ 查 20.2.0 六槽偏移/调用约定差异
 
+> **✅ F57 实机：20.2.0 exFAT = 3 PASS** → 分支 1 成立：**20.2.0 全量 codecvt OK，F56 失败 = 锚点未生效**。
+
+| 58 | `9FF8B436` | **F58 探针执行检测**：默认 0（F57 全量基座，exFAT 3P 已验证）+ 锚点探针**反向写 `g_fat_path=1`**（mov w17,#1 + str w17,[x16]）。探针未执行→全程 0→3P；探针执行→挂载时置 1→受限→FAIL PASS FAIL | 🧪 待真机（20.2.0 exFAT，检测探针是否执行） |
+
+- F58 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
+- SHA-256 完整：`9FF8B436ABB8090BC0B79AF7817CAC9398DAD76361F827CFFE3CE2C2EF57A745`
+- 大小：0x2AC4 = 10948B；flags=0x78。探针 6 指令 0x18B（cave 0x1096C0+0x18=0x1096D8 < dir trampoline 0x1096E0 ✓）
+- **背景链**：F56（默认1+锚点写0）FAIL PASS FAIL → 已强烈暗示探针未执行（若执行应 3P）。F57（默认0）3P 证明全量 OK，但默认 0 掩蔽了探针。F58 用反向探针一锤定音。
+- **探针地址已排除 bug**：KIP 链接基址 0x0（fs_codecvt.ld），ADRP 为 PC 相对，install() 里 `&g_fat_path` 运行时正确；encode_adrp delta < 1MB（F56 有 hook 证明 encode_adrp 成功）
+- **最可能根因**：`0x0ED980` 虽在"挂载函数"（读 VBR+校验+置标志+注册卷）内被唯一调用，但 20.2.0 该函数可能处理**其他 exFAT 卷**（eMMC 分区），SD exFAT 挂载走新路径 → 锚点不触发
+
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
 - 大小：0x284C = 10316B；flags@0x1F=`0x78`；bss_end=0x8000 对齐。加载器校验通过。
