@@ -64,6 +64,16 @@ PASS 证明 dir hook 不是差异化因素。
   - FAT32 SD：若 eMMC USER 为 FAT32/其他 → 3 PASS；若为 exFAT → 可能回归（此时需把锚点限定到 SD 卷）
 - **多版本**：20.5.0=`0x0EDA80`、21.2.0=`0x0F3210`、22.0/22.5=`0x0F59C0`（cave 待补，本次仅 19.0.1 启用）
 
+| 56 | `A195CEFF` | **F56 20.2.0 锚点启用**：定位并接线 20.2.0 exFAT 引导区校验和锚点。20.2.0 为 **NSO0** 格式（19.0.1 为 NOS0，text_size 字段偏移不同）；锚点 `0x0ED980`=`D101C3FF`(sub sp,#0x70)+`A9017BFD`，体内 `cmp #0x70/#0x6a + ror w24,#1` 校验和循环与 19.0.1 同构（对照 20.5.0 `0x0EDA80` 仅差 0x300）；FAT-only 二进制 `0x0ED980`=`2A1803E3` 非锚点（exFAT-only 验证）；探针死区 `0x1096C0`（dead uni2oem body，dir trampoline `0x1096E0` 前 0x20B，不重叠） | 🧪 待真机（20.2.0 exFAT 3P？） |
+
+- F56 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
+- SHA-256 完整：`A195CEFF6AABF48C5A19DA0538485FA2915CC45CB541C0F24F43FB320CB0372C`
+- 大小：0x2AC8 = 10952B；flags=0x78；bss_end=0x8000 对齐。加载器校验通过。
+- **20.2.0 锚点定位方法**（capstone）：FS_proper.nso（NSO0）→ codecvt[0]@`0x109440`=`39C00008` 匹配 → 在 20.5.0 锚点 `0x0EDA80` 附近反汇编 → 0x0ED980 起 `sub sp,#0x70`+校验和循环（跳过 0x6a/0x70 偏移）。
+- **版本选择不受 hash 影响**：`matches_fs` 为纯 opcode 匹配（codecvt[0] 双指令 + dir/path/pattern/SFN 入口 + identity_checks），`g_fs_hashes` 仅文档（已把 20.2.0 实际 hash `ADEDF4BC...` 填回表）。
+- **F55 遗留 20.2.0 FAIL PASS FAIL 根因**：20.2.0 表 exfat_cave=0 被 install() 跳过 → 锚点未接线 → g_fat_path 保持 1（受限）→ 20.2.0 exFAT 驱动路径走受限 slot0/slot1 → 重复建目录。F56 已接线。
+- **多卷风险同 F55**：锚点对任意 exFAT 卷触发，需双介质实测确认无 eMMC USER exFAT 误触发。
+
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
 - 大小：0x284C = 10316B；flags@0x1F=`0x78`；bss_end=0x8000 对齐。加载器校验通过。
