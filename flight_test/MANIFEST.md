@@ -114,18 +114,20 @@ PASS 证明 dir hook 不是差异化因素。
 
 ## 跨版本离线验证（matches_fs 全量复刻，2026-08-02）
 
-用 `verify_all_versions.py` 对 5 版本 exFAT FS 二进制复刻 `matches_fs()` 全部检查（六槽偏移+双指令、dir_hook、path_from/in、pattern、SFN、identity×6、sanitize）：
+用 `verify_all_versions.py` 对 5 版本 **ExFAT-capable FS** 复刻 `matches_fs()` 全部检查（六槽偏移+双指令、dir_hook、path_from/in、pattern、SFN、identity×6、sanitize）：
 
-| 版本 | 离线 matches_fs | 实机 |
-|---|---|---|
-| 19.0.1 | ✅ PASS | ✅ FAT32 3P（F59）|
-| 20.2.0 | ✅ PASS | ✅ exFAT 3P（F59）|
-| 21.2.0 | ✅ PASS | 未测（offset 表正确）|
-| 22.0.0 | ✅ PASS | 未测（offset 表正确）|
-| **22.5.0** | ❌ **FAIL** | ❌ 不支持 |
+| 版本 | ExFAT-capable FS | 离线 matches_fs | 实机 |
+|---|---|---|---|
+| 19.0.1 | `AMS-19.0.1\exFAT\...\FS_proper.nso` | ✅ PASS | ✅ FAT32 3P（F59）|
+| 20.2.0 | `AMS-20.2.0_work\exFAT\...\FS_proper.nso` | ✅ PASS | ✅ exFAT 3P（F59）|
+| 21.2.0 | `AMS-21.2.0\exFAT\...\FS.nso` | ✅ PASS | ✅ nx-filesystem-utf8 五版本 FAT32 回归 + exFAT |
+| 22.0.0 | `AMS-22-analysis\22.0.0\exFAT\...\FS_decomp.kip1` | ✅ PASS | ✅ 同上 |
+| 22.5.0 | `AMS-22-analysis\22.5.0\exFAT\...\FS_decomp.kip1` | ✅ PASS | ✅ 同上 + 22.5.0 exFAT 3P |
 
-- **22.5.0 offset 表错误**：注释"identical to 22.0.0"是假的。实际 22.5.0 的 codecvt 六槽在 `0x1001D0/0x100320/0x1004F0/0x100530/0x100580/0x100590`（=22.0.0 偏移 **-0x11350**，codecvt[0] 已验证 0x39C00008 匹配），但 **dir_hook/path/pattern/SFN/identity/sanitize 区域重排程度不同**（非统一偏移），需逐一定位。当前 22.5.0 上 matches_fs 失败 → 无 hook → 原生 FS。
-- **把握度**：matches_fs 是纯 opcode 匹配，离线 PASS = KIP 运行时必选中+hook 该版本；F59 codecvt 逻辑与版本无关（纯静态替换），故 21.2.0/22.0.0 把握较高但**未实机**（运行时 FAT32 栈布局/dir hook 细节可能有版本差异）。
+- **全部 5 版本 offset 表正确**（matches_fs 纯 opcode 匹配全过 → KIP 运行时必选中+hook）。
+- **⚠️ 修正记录**：此前"22.5.0 offset 表错误"是**误报**——验证时用了 `AMS-22.5.0_work\...\FS_proper.nso`，那是 **22.5.0 的 FAT 变体**（六槽在 `0x1001D0`，FAT-only），而 offset 表针对 **ExFAT-capable 变体**（六槽在 `0x111520`）。22.x 的 FAT 变体与 ExFAT-capable 变体 offset **不同**（`build_patches22.py` 有完整对照：FAT=`0x1001D0/.../dir 0xE6F80`，exFAT=`0x111520/.../dir 0xE7040`）。fs_codecvt 只支持 ExFAT-capable（FAT32 介质也跑它）。
+- **实机证据（nx-filesystem-utf8 docs）**：`atmosphere-kip-utf8-overlay-zh_CN.md`："22.5.0 exFAT 介质…三项 PASS；五版本均正常启动且三项验证全部 PASS"；`fat32-media-validation-zh_CN.md`："22.5.0 | FAT32 | ExFAT-capable FS | PASS PASS PASS"。
+- **把握度**：5/5 offset 离线 PASS + 五版本 FAT32 实机回归 + 22.5.0 exFAT 实机（union 前方案）+ F59 新方案 19.0.1 FAT32/20.2.0 exFAT 双介质 3P → **高把握**。F59 与 union 前方案 codecvt 逻辑一致（纯静态六槽替换），仅 slot0/slot1 固定方式不同。
 
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
