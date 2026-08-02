@@ -22,7 +22,12 @@ PASS 证明 dir hook 不是差异化因素。
 > D69657FD 逐项相同），证明 exFAT 失败路径由 **slot0 两字节有损解码**驱动：exFAT 驱动
 > 路径依赖 slot0 做完整三字节 CJK 解码，有损后建名不匹配 → 重复创建。
 
-| 50 | `63FCE7FF` | F49 基础上 **slot0 换回完整三字节 `oem2unicode_utf8`**（其余并集不变：slot1/2/4/5 + path-transform + SFN + dir + sanitize NOP） | 🧪 待真机 |
+| 50 | `63FCE7FF` | F49 基础上 **slot0 换回完整三字节 `oem2unicode_utf8`**（其余并集不变：slot1/2/4/5 + path-transform + SFN + dir + sanitize NOP） | ✅ **exFAT：3 PASS** |
+
+> **F50 结论**：slot0 完整三字节 = exFAT 侧唯一缺口，并集（六槽+path-transform+SFN+
+> dir+sanitize NOP）在 exFAT 上完全成立。⚠️ F50 在 **FAT32 上预计黑屏**：源码确认
+> `unicode2oem`（slot1）存在两字节临时缓冲（`pf_path.c:167 tmp_wc` / `:595 Dest[2]`），
+> FAT32 路径写爆 → 真正 dual 需 slot0+slot1 按介质分发。
 
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
