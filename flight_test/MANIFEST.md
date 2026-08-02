@@ -94,7 +94,7 @@ PASS 证明 dir hook 不是差异化因素。
 - **探针地址已排除 bug**：KIP 链接基址 0x0（fs_codecvt.ld），ADRP 为 PC 相对，install() 里 `&g_fat_path` 运行时正确；encode_adrp delta < 1MB（F56 有 hook 证明 encode_adrp 成功）
 - **最可能根因**：`0x0ED980` 虽在"挂载函数"（读 VBR+校验+置标志+注册卷）内被唯一调用，但 20.2.0 该函数可能处理**其他 exFAT 卷**（eMMC 分区），SD exFAT 挂载走新路径 → 锚点不触发
 
-| 59 | `B78E72FB` | **F59 无分发方案（锚点方案弃用）**：slot0 永远全量 UTF-8（`oem2unicode_utf8`）+ slot1 永远受限 ≤2B（`unicode2oem_bounded_utf8`）+ slot2/4/5 UTF-8；**移除锚点探针 + 清零全部 exfat offset 字段**。依据 PrFILE2 源码（见下） | 🧪 待真机（20.2.0 exFAT 3P？→ 再测 19.0.1 FAT32 3P？） |
+| 59 | `B78E72FB` | **F59 无分发方案（锚点方案弃用）**：slot0 永远全量 UTF-8（`oem2unicode_utf8`）+ slot1 永远受限 ≤2B（`unicode2oem_bounded_utf8`）+ slot2/4/5 UTF-8；**移除锚点探针 + 清零全部 exfat offset 字段**。依据 PrFILE2 源码（见下） | ✅ **双介质 3 PASS：20.2.0 exFAT 3P + 19.0.1 FAT32 3P** |
 
 - F59 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`B78E72FB56085E130E445641426EDB2651EA19DE375473F49DE4B4DA8FDD7F55`
@@ -105,6 +105,12 @@ PASS 证明 dir hook 不是差异化因素。
   - **slot1 必须受限**：3 处严格 2 字节 DBCS 临时缓冲 —— `OEM_ConvertFWchar`(dst)、`GetNextCharOfPattern`(tmp_wc)、`GetLengthFromUnicode`(Dest[2])，CJK 3 字节写入 = **栈破坏**（FAT32 黑屏源码级根因）；受限 + slot2 对 CJK 返回 2 与 FAT32 SFN 8.3 记账兼容（`parseShortName` 硬编码 `width-=2`）
   - **待验证风险**：exFAT 路径 slot1 受限是否够用（受限把 3 字节 CJK 截 2 字节；若 exFAT 的 slot1 调用点需完整编码 → 建名不匹配 → 需转调用点分发）
 - **方案对比**：F59 若双介质 3P = 终极方案（无 g_fat_path、无锚点、无介质信号，纯静态六槽）
+
+> **✅ F59 实机：双介质 3 PASS（20.2.0 exFAT 3P + 19.0.1 FAT32 3P）—— 终极方案达成！**
+> **结论**：exFAT 路径的 slot1 受限（截 3B→2B）**不影响**中文文件名读写/枚举（F59 的 slot0 全量正确解码 + slot1 受限编码仍保持 UTF-8 语义，长度记账按 slot2 宽 2 与两介质兼容）。F49→F59 迭代闭环：
+> - slot0 全量 = exFAT 修复（F50）+ FAT32 安全（PrFILE2 源码：oem2unicode 调用点输出单 u16）
+> - slot1 受限 = FAT32 修复（F51）+ exFAT 兼容（F59 实测）
+> - **不再需要 g_fat_path 分发 / exFAT 锚点 / 介质信号**——纯静态六槽，跨版本仅依赖六槽偏移表（已支持 19.0.1/20.2.0/21.2.0/22.0.0/22.5.0）
 
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
