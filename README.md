@@ -1,5 +1,10 @@
 # nx-fs-utf8
 
+> **Branch note (`codex/exfat`):** this branch builds an exFAT-only regression
+> candidate using the original six-slot `PF_CHARCODE` replacement strategy.
+> It intentionally does not match the FAT32-only FS image. The generated KIP
+> still requires hardware regression testing before release.
+
 `nx-fs-utf8` is an independently buildable FS Overlay KIP that adds UTF-8
 filename compatibility to the Nintendo Switch FS sysmodule. It is designed to
 be prepended to FS by a compatible Fusee or Hekate FS Overlay loader.
@@ -31,9 +36,10 @@ Standalone KIP: creates another Initial Process
 FS Overlay KIP: becomes a prefix inside the existing FS process image
 ```
 
-The current offset table supports the tested HOS 19.0.1, 20.2.0, 21.2.0,
-22.0.0, and 22.5.0 FS variants used by this project. Those versions completed
-the FAT32-media hardware regression in the original development environment.
+The exFAT branch contains profiles for the exFAT-capable FS variants used by
+HOS 19.0.1, 20.2.0, 21.2.0, 22.0.0, and 22.5.0. It does not contain the
+FAT32-only FS profile. Do not infer cross-version exFAT validation from the
+earlier FAT32-media regression results.
 
 ## Requirements
 
@@ -54,8 +60,8 @@ make -j4
 The build produces:
 
 ```text
-fs_codecvt.elf
-fs_codecvt_unpacked.kip
+fs_codecvt_exfat.elf
+fs_codecvt_exfat_unpacked.kip
 ```
 
 The unpacked KIP is the deployable FS Overlay. Its loadable sections are stored
@@ -90,19 +96,19 @@ controls, expected results, and the SD-card write warning.
 
 This KIP must be loaded through an FS Overlay mechanism. For Hekate, use only
 the fork-specific `fsoverlay=` key shown below; `kip1=` is not compatible with
-this project and must not point to `fs_codecvt_unpacked.kip`.
+this project and must not point to `fs_codecvt_exfat_unpacked.kip`.
 
 Fusee-compatible layout:
 
 ```text
-sdmc:/atmosphere/fs_overlays/fs_codecvt_unpacked.kip
+sdmc:/atmosphere/fs_overlays/fs_codecvt_exfat_unpacked.kip
 ```
 
 Hekate Fork boot entry:
 
 ```ini
 pkg3=atmosphere/package3
-fsoverlay=atmosphere/fs_overlays/fs_codecvt_unpacked.kip
+fsoverlay=atmosphere/fs_overlays/fs_codecvt_exfat_unpacked.kip
 ```
 
 When emuMMC is enabled in the Hekate path, use the relocatable emuMMC build

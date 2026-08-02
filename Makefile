@@ -7,7 +7,7 @@ ifeq ($(strip $(DEVKITPRO)),)
 $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path-to-devkitpro>")
 endif
 
-TARGET  := fs_codecvt
+TARGET  := fs_codecvt_dual
 BUILD   := build
 SOURCES := source/nx source source/utils
 INCLUDES := include

@@ -29,6 +29,70 @@ static Handle self_proc_handle;
 static char inner_heap[INNER_HEAP_SIZE];
 static const FsCodecvtOffsets *fs_offs;
 
+/* === F53 dual medium flag =================================================
+ * g_fat_path: 1 = FAT32/PrFILE2-VF driver path active (slot0/slot1 bounded),
+ *             0 = exFAT driver path active (slot0/slot1 full UTF-8).
+ *
+ * F52 proved the path-transform hooks fire on BOTH media, so they cannot be a
+ * FAT32 signal and must NOT latch the flag.  F53 keeps the SAFE default = 1
+ * (FAT32/bounded; never over-reads/over-writes PrFILE2 two-byte temps) with no
+ * latches; an exFAT-only mount anchor (fs_codecvt_note_exfat_path) will flip
+ * the flag to 0 once located (delegated RE).  FAT32 = 3P; exFAT currently = 3
+ * FAIL until that anchor is wired. */
+static volatile u32 g_fat_path = 0;  /* F57 A/B test: default 0 = exFAT full UTF-8 (F50-equivalent, no anchor dep). FAT32 will break — exFAT-only test. */
+
+extern "C" void fs_codecvt_note_fat_path(void) {
+    g_fat_path = 1;
+}
+extern "C" void fs_codecvt_note_exfat_path(void) {
+    g_fat_path = 0;
+}
+
+/* F59 (no-dispatch): slot0 ALWAYS full three-byte UTF-8 decoder.
+ * exFAT fix (F50); FAT32 safe per PrFILE2 source (all oem2unicode call sites
+ * output a single u16 into a caller buffer, no constrained temp). */
+static pf_s32 oem2unicode_dual(const pf_s8* src, pf_u16* dst) {
+    return oem2unicode_utf8(src, dst);
+}
+
+/* F51 slot1 dispatch.  The FAT32/PrFILE2 path calls unicode2oem with several
+ * two-byte DBCS temporaries (pf_path.c: OEM_ConvertFWchar/GetNextCharOfPattern/
+ * GetLengthFromUnicode) so the FAT32 side must never write >2 bytes; the
+ * full-buffer site (transformFromUnicodeToNormal) is dead because that routine
+ * is itself replaced by the complete-string path hook.  The exFAT path needs
+ * the full UTF-8 encoder (F50). */
+static pf_s32 unicode2oem_bounded_utf8(const pf_u16* src, pf_s8* dst) {
+    const pf_u16 u = src[0];
+    if (u < 0x80) { /* ASCII: 1 byte + NUL fits a u16 temp */
+        dst[0] = static_cast<pf_s8>(u);
+        dst[1] = 0;
+        return (1 << 16) | 2;
+    }
+    if (u < 0x800) { /* 2-byte UTF-8: 2 bytes + NUL fits a u16 temp */
+        dst[0] = static_cast<pf_s8>(0xC0 | (u >> 6));
+        dst[1] = static_cast<pf_s8>(0x80 | (u & 0x3F));
+        return (2 << 16) | 2;
+    }
+    /* 3-byte UTF-8 cannot fit a two-byte DBCS temporary: write only two bytes
+     * (never overflow) but report the true 3-byte width so length/bound
+     * accounting stays UTF-8-correct.  Byte-level SFN/pattern matching treats
+     * the lead byte like a DBCS lead via is_oem_mb (same classification). */
+    dst[0] = static_cast<pf_s8>(0xE0 | (u >> 12));
+    dst[1] = static_cast<pf_s8>(0x80 | ((u >> 6) & 0x3F));
+    return (3 << 16) | 2;
+}
+
+/* F59 (no-dispatch): slot1 ALWAYS bounded (<=2 byte) UTF-8 encoder.
+ * FAT32 fix (F51): PrFILE2 has 3 strict 2-byte DBCS temps
+ * (OEM_ConvertFWchar / GetNextCharOfPattern / GetLengthFromUnicode) — a
+ * 3-byte CJK write would smash the stack (FAT32 black-screen root cause).
+ * exFAT must be verified: bounded truncates 3-byte CJK to 2 bytes. */
+static pf_s32 unicode2oem_dual(const pf_u16* src, pf_s8* dst) {
+    return unicode2oem_bounded_utf8(src, dst);
+}
+
+static constexpr u32 NOP = 0xD503201F;
+
 extern "C" void __initheap(void) {
     extern char *fake_heap_start, *fake_heap_end;
     fake_heap_start = inner_heap;
@@ -56,7 +120,20 @@ static bool encode_b_cond(uintptr_t source, uintptr_t target, u32 condition, u32
     return true;
 }
 
+static bool encode_adrp(uintptr_t pc, uintptr_t target_page, u32 *out, u32 rd) {
+    const s64 delta = static_cast<s64>(target_page) - static_cast<s64>(pc & ~0xFFFLL);
+    if (delta < -(1LL << 20) || delta >= (1LL << 20)) return false;
+    const u64 imm = static_cast<u64>(delta & 0x1FFFFF);
+    *out = 0x90000000u | ((imm & 0x3) << 29) | (((imm >> 2) & 0x7FFFF) << 5) | (rd & 0x1F);
+    return true;
+}
+
+static u32 encode_add_imm12(u32 rd, u32 rn, u32 imm12) {
+    return 0x91000000u | ((imm12 & 0xFFF) << 10) | (rn << 5) | rd;
+}
+
 static void w32(uintptr_t a, u32 v) { *(u32*)(fs_rw_mapping+(a-fs_code_base)) = v; }
+static void nop(uintptr_t a) { w32(a, NOP); }
 
 static void recv_thread(void *arg) {
     Handle h = *(Handle*)arg;
@@ -97,7 +174,11 @@ static bool map_fs(void) {
 static void unmap(void){if(fs_rw_mapping){svcUnmapProcessMemory(fs_rw_mapping,self_proc_handle,fs_code_base,fs_code_size);fs_rw_mapping=0;}}
 
 static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffsets *o) {
-    if (!o->codecvt[0] || !o->codecvt[3] ||
+    /* Dual FAT32/exFAT contract: require the full six-slot PF_CHARCODE table
+     * (exFAT driver path) AND the high-level path-transform/SFN entries
+     * (FAT32/PrFILE2-VF driver path) together with the dir output hook. */
+    if (!o->codecvt[0] || !o->codecvt[1] || !o->codecvt[2] ||
+        !o->codecvt[3] || !o->codecvt[4] || !o->codecvt[5] ||
         !o->path_from_unicode || !o->path_in_unicode ||
         !o->pattern_next_char || !o->parse_shortname_entry ||
         !o->dir_hook || !o->dir_reject || !o->dir_ascii_checks ||
@@ -119,6 +200,8 @@ static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffs
         }
     }
     if (o->parse_shortname_entry && o->parse_shortname_entry + sizeof(u32) > max_offset) max_offset = o->parse_shortname_entry + sizeof(u32);
+    if (o->exfat_mount_entry && o->exfat_mount_entry + sizeof(u32) > max_offset) max_offset = o->exfat_mount_entry + sizeof(u32);
+    if (o->exfat_cave && o->exfat_cave + 0x20 > max_offset) max_offset = o->exfat_cave + 0x20;
     const uintptr_t last = base + max_offset;
     if (last < base || last > region_end) return false;
     const volatile u32 *entry = reinterpret_cast<const volatile u32 *>(base + o->codecvt[0]);
@@ -134,6 +217,8 @@ static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffs
         }
     }
     if (o->parse_shortname_entry && *reinterpret_cast<const volatile u32 *>(base + o->parse_shortname_entry) != o->parse_shortname_entry_opcode) return false;
+    if (o->exfat_mount_entry && o->exfat_mount_opcode &&
+        *reinterpret_cast<const volatile u32 *>(base + o->exfat_mount_entry) != o->exfat_mount_opcode) return false;
     for (int i = 0; i < 3; ++i) {
         if (o->sanitize[i] == 0) continue;
         const u32 op = *reinterpret_cast<const volatile u32 *>(base + o->sanitize[i]);
@@ -166,7 +251,8 @@ static s32 find_fs(uintptr_t region_end) {
 
 static bool install(void) {
     const FsCodecvtOffsets *o = fs_offs;
-    if (!o->codecvt[0] || !o->codecvt[3] ||
+    if (!o->codecvt[0] || !o->codecvt[1] || !o->codecvt[2] ||
+        !o->codecvt[3] || !o->codecvt[4] || !o->codecvt[5] ||
         !o->path_from_unicode || !o->path_in_unicode ||
         !o->pattern_next_char || !o->parse_shortname_entry ||
         !o->dir_hook || !o->dir_reject || !o->dir_ascii_checks ||
@@ -174,19 +260,32 @@ static bool install(void) {
         return false;
     }
 
-    /* The legacy PF_CHARCODE path may provide only a two-byte temporary.
-     * Hook only OEM->Unicode and byte classification at this layer. */
-    u32 oem2unicode_hook, is_oem_mb_hook;
-    if (!encode_b(fs_code_base + o->codecvt[0],
-                  reinterpret_cast<uintptr_t>(&oem2unicode_dbcs_safe),
-                  &oem2unicode_hook)) return false;
-    if (!encode_b(fs_code_base + o->codecvt[3],
-                  reinterpret_cast<uintptr_t>(&is_oem_mb_utf8),
-                  &is_oem_mb_hook)) return false;
+    /* F51 dual medium dispatch: slot0 + slot1 switch on g_fat_path.
+     *  - FAT32 (g_fat_path=1): slot0 = bounded 2-byte-safe decoder, slot1 =
+     *    bounded UTF-8 encoder (never over-writes PrFILE2 two-byte temps).
+     *  - exFAT (g_fat_path=0): slot0 = full 3-byte decoder (F50 fix), slot1 =
+     *    full UTF-8 encoder.
+     *  - slots 2/4/5 stay full UTF-8: their callers pass full strings, so the
+     *    UTF-8 widths/classification are safe on both media.  slot3 stays UTF-8
+     *    byte classification (both validated). */
+    const uintptr_t codecvt_targets[6] = {
+        reinterpret_cast<uintptr_t>(&oem2unicode_dual),
+        reinterpret_cast<uintptr_t>(&unicode2oem_dual),
+        reinterpret_cast<uintptr_t>(&oem_char_width_utf8),
+        reinterpret_cast<uintptr_t>(&is_oem_mb_utf8),
+        reinterpret_cast<uintptr_t>(&unicode_char_width_utf8),
+        reinterpret_cast<uintptr_t>(&is_unicode_mb_utf8),
+    };
+    u32 codecvt_hooks[6];
+    for (int i = 0; i < 6; ++i) {
+        if (!encode_b(fs_code_base + o->codecvt[i], codecvt_targets[i],
+                      &codecvt_hooks[i])) return false;
+    }
 
-    /* These entry points receive complete strings and can safely perform
-     * full UTF-8 conversion. */
-    u32 path_from_hook, path_in_hook, pattern_next_hook;
+    /* High-level complete-string converters (FAT32/PrFILE2-VF driver path).
+     * These receive full NUL-terminated strings and perform lossless UTF-8
+     * conversion; on the exFAT driver path they are harmless dormant hooks. */
+    u32 path_from_hook, path_in_hook, pattern_next_hook, parse_shortname_hook;
     if (!encode_b(fs_code_base + o->path_from_unicode,
                   reinterpret_cast<uintptr_t>(&transform_from_unicode_to_normal_utf8),
                   &path_from_hook)) return false;
@@ -196,8 +295,6 @@ static bool install(void) {
     if (!encode_b(fs_code_base + o->pattern_next_char,
                   reinterpret_cast<uintptr_t>(&get_next_char_of_pattern_utf8),
                   &pattern_next_hook)) return false;
-
-    u32 parse_shortname_hook;
     if (!encode_b(fs_code_base + o->parse_shortname_entry,
                   reinterpret_cast<uintptr_t>(&parse_short_name_utf8_fat),
                   &parse_shortname_hook)) return false;
@@ -244,12 +341,27 @@ static bool install(void) {
         w32(fs_code_base + o->dir_hook, dir_hook);
     }
 
-    w32(fs_code_base + o->codecvt[0], oem2unicode_hook);
-    w32(fs_code_base + o->codecvt[3], is_oem_mb_hook);
+    for (int i = 0; i < 6; ++i) {
+        w32(fs_code_base + o->codecvt[i], codecvt_hooks[i]);
+    }
     w32(fs_code_base + o->path_from_unicode, path_from_hook);
     w32(fs_code_base + o->path_in_unicode, path_in_hook);
     w32(fs_code_base + o->pattern_next_char, pattern_next_hook);
     w32(fs_code_base + o->parse_shortname_entry, parse_shortname_hook);
+    for (int i = 0; i < 3; ++i) {
+        if (o->sanitize[i]) nop(fs_code_base + o->sanitize[i]);
+    }
+
+    /* F55: exFAT mount anchor.  The exFAT boot-checksum verify function
+     * (0x0E2BA0 on 19.0.1) runs ONLY on the exFAT mount success path, before
+     * any user path operation (FAT32 mounts via the independent PrFILE
+     * driver; the VBR check rejects non-exFAT before this runs).  Probe it to
+     * latch g_fat_path=0 so the slot0/slot1 dispatchers pick full UTF-8. */
+    /* F59: anchor-probe approach dropped. PrFILE2 source shows the codeset
+     * global (VFipf_vol_set.codeset) is CP932 and NEVER changes (p_setcode is
+     * called only from InitModule), so an exFAT mount cannot flip it and the
+     * 0x0ED980-style anchor never fired on 20.2.0.  Instead the dispatcher is
+     * now fixed (slot0 full / slot1 bounded) with no media signal at all. */
     return true;
 }
 
