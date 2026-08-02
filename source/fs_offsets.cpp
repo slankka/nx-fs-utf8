@@ -23,9 +23,8 @@
 const u8 g_fs_hashes[FsVer_Count][8] = {
     /* FsVer_19_0_0_Exfat */
     { 0xED, 0xA8, 0x78, 0x68, 0xA4, 0x49, 0x07, 0x50 },
-    /* FsVer_20_2_0_Exfat — NOTE: 20.2.0 is between 20.1.0 and 21.0.0,
-       using 20.0.0 ExFAT hash as closest match */
-    { 0x47, 0x41, 0x07, 0x10, 0x65, 0x4F, 0xA4, 0x3F },
+    /* FsVer_20_2_0_Exfat — FS_proper.nso SHA256 ADEDF4BC5886210C... */
+    { 0xAD, 0xED, 0xF4, 0xBC, 0x58, 0x86, 0x21, 0x0C },
     /* FsVer_21_2_0_Exfat */
     { 0x56, 0x25, 0x17, 0xA1, 0x92, 0xC3, 0xC8, 0xF0 },
     /* FsVer_22_0_0_Exfat */
@@ -92,8 +91,12 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
             { 0x10086C, 0xD108C3FF },
             { 0x100890, 0x940363A0 },
         },
+        /* exFAT mount anchor: boot-checksum verify @0x0ED980 (20.2.0,
+         * NSO0 format). Verified: entry D101C3FF/A9017BFD, absent in the
+         * FAT-only binary; cave=0x1096C0 (dead uni2oem body, before the
+         * dir trampoline at 0x1096E0, writable+executable). */
         0x100850, 0xA9BA7BFD,
-        0x0, 0x0, 0x0,  /* exFAT anchor: 20.2.0 not yet verified */
+        0x0ED980, 0xD101C3FF, 0x1096C0,
     },
     /* FsVer_21_2_0_Exfat — full codecvt + dir hook (capstone-verified).
      * Dir hook at 0xE48D0 (b.lo→0xE4864), byte in W10 (ldrb w10,[x28,x8]).
