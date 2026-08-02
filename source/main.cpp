@@ -29,17 +29,17 @@ static Handle self_proc_handle;
 static char inner_heap[INNER_HEAP_SIZE];
 static const FsCodecvtOffsets *fs_offs;
 
-/* === F51/F52 dual medium flag =============================================
+/* === F53 dual medium flag =================================================
  * g_fat_path: 1 = FAT32/PrFILE2-VF driver path active (slot0/slot1 bounded),
  *             0 = exFAT driver path active (slot0/slot1 full UTF-8).
  *
- * F51 default = 1 (FAT32/bounded): SAFE on both media (bounded never
- * over-reads/over-writes PrFILE2 two-byte temps); FAT32 3P validated.
- * F52 flips the default to 0 (exFAT/full, F50-equivalent) to TEST whether the
- * FAT32 path-transform latch fires before the first two-byte-temp codecvt call
- * on a FAT32 volume.  If FAT32 also passes with default=0, one KIP serves both
- * media with no exFAT anchor needed. */
-static volatile u32 g_fat_path = 0;
+ * F52 proved the path-transform hooks fire on BOTH media, so they cannot be a
+ * FAT32 signal and must NOT latch the flag.  F53 keeps the SAFE default = 1
+ * (FAT32/bounded; never over-reads/over-writes PrFILE2 two-byte temps) with no
+ * latches; an exFAT-only mount anchor (fs_codecvt_note_exfat_path) will flip
+ * the flag to 0 once located (delegated RE).  FAT32 = 3P; exFAT currently = 3
+ * FAIL until that anchor is wired. */
+static volatile u32 g_fat_path = 1;
 
 extern "C" void fs_codecvt_note_fat_path(void) {
     g_fat_path = 1;

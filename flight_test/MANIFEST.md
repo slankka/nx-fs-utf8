@@ -34,13 +34,22 @@ PASS 证明 dir hook 不是差异化因素。
 > **F51 结论**：FAT32 侧分发器成立——受限 slot0/slot1 + slot2/4/5 UTF-8 + sanitize NOP 均不破坏
 > FAT32。至此双介质各自 3P：exFAT=F50（`63FCE7FF`），FAT32=F51（`07DD6224`）。
 
-| 52 | `91C73B43` | **F52 决定性实验**：仅把 F51 默认值翻转为 0（exFAT/full，F50 等价），其余不变——检验 FAT32 的 path-transform 锁存是否在首次两字节临时 codecvt 调用前触发 | 🧪 待真机（双介质） |
+| 52 | `91C73B43` | **F52 决定性实验**：仅把 F51 默认值翻转为 0（exFAT/full，F50 等价），其余不变——检验 FAT32 的 path-transform 锁存是否在首次两字节临时 codecvt 调用前触发 | ⚠️ FAT32：3 PASS；**exFAT：FAIL PASS FAIL（重复建目录）** |
 
-- F52 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
-- SHA-256 完整：`91C73B433F513728D6A1EF413EE77BE818DD3FCA63E86E34B2533ADDE81164B7`
-- 大小：0x29C4 = 10692B；flags=0x78；bss_end=0x8000 对齐。加载器校验通过。
-- **预期**：exFAT = 3 PASS（默认 full，无 FAT32 锁存触发）；FAT32 = 3 PASS（若锁存先于
-  两字节临时调用）或黑屏（若两字节临时先于锁存）。F52 双介质均 3P 则 **dual 直接完成、无需锚点**。
+> **F52 关键结论（推翻旧假设）**：exFAT 上 `g_fat_path` 被锁存成 1（受限），唯一置 1 的
+> 是 4 个 path-transform hook 入口 → **path-transform 例程在 exFAT 上也被调用**（两种介质
+> 都走 PrFILE2 path 层，仅 SFN/pattern 字节级 codecvt 是 FAT32 专属）。因此：
+> ① path-transform **不能**当 FAT32 信号；② F52 的锁存正是 exFAT 失败元凶；
+> ③ 真正的 dual 需**移除 path-transform 锁存** + 默认 1（受限安全）+ **exFAT 专属锚点**（如
+> 0x7A1DC "EXTC" 检测，vtable 间接调用，待确认）置 0。
+
+| 53 | `8DC516AA` | **F53 锚点就绪基座**：移除 4 个 path-transform 锁存调用（F52 元凶，也会撤销未来 exFAT 锚点），默认=1（受限安全），`fs_codecvt_note_exfat_path()` 保持预留 | 🧪 待真机（预期同 F51：FAT32 3P / exFAT 3 FAIL） |
+
+- F53 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
+- SHA-256 完整：`8DC516AA3AB66382ABC11A5853A984F93F86F6CB138527D3443B926D45866953`
+- 大小：0x2988 = 10632B；flags=0x78；bss_end=0x8000 对齐。加载器校验通过。
+- **待接入**：exFAT 专属锚点（定位 exFAT 挂载/检测函数后调 `fs_codecvt_note_exfat_path()` 置 0），
+  完成后 F53+锚点 = 双介质 dual（FAT32 3P + exFAT 3P）。
 
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`

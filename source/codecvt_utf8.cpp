@@ -205,7 +205,6 @@ pf_bool is_unicode_mb_utf8(pf_u16 /*src*/, pf_bool /*num*/) {
  * guaranteed to be a complete NUL-terminated string. */
 
 pf_s32 transform_from_unicode_to_normal_utf8(pf_s8* dst, const pf_u16* src) {
-    fs_codecvt_note_fat_path();  /* F51: FAT32/PrFILE2-VF path active */
     while (*src != 0) {
         const pf_s32 width = unicode2oem_utf8(src, dst);
         const pf_s16 oem_width = static_cast<pf_s16>(width >> 16);
@@ -218,7 +217,6 @@ pf_s32 transform_from_unicode_to_normal_utf8(pf_s8* dst, const pf_u16* src) {
 }
 
 pf_s32 transform_in_unicode_utf8(pf_u16* dst, const pf_s8* src) {
-    fs_codecvt_note_fat_path();  /* F51: FAT32/PrFILE2-VF path active */
     pf_s32 count = 0;
     while (*src != 0) {
         const pf_s32 width = oem2unicode_utf8(src, dst);
@@ -233,7 +231,6 @@ pf_s32 transform_in_unicode_utf8(pf_u16* dst, const pf_s8* src) {
 }
 
 pf_u16 get_next_char_of_pattern_utf8(PfStr64* pattern, pf_bool is_long_name) {
-    fs_codecvt_note_fat_path();  /* F51: FAT32/PrFILE2-VF path active */
     if (!pattern || !pattern->head) return 0;
     pf_u16 wc = 0;
     if (pattern->code_mode == 1) {
@@ -386,7 +383,6 @@ static void append_alias_part(pf_s8* dst, u32* pos, u32 limit,
 }
 
 pf_u32 parse_short_name_utf8_fat(pf_s8* dst, const PfStr64* pattern) {
-    fs_codecvt_note_fat_path();  /* F51: FAT32/PrFILE2-VF path active */
     if (!dst) return 1;
     dst[0] = 0;
     if (!pattern || !pattern->head || !pattern->tail ||
