@@ -12,29 +12,52 @@ exFAT 驱动路径直接依赖六槽 PF_CHARCODE（不走 path-transform），�
 codecvt 层自相矛盾 → direct r/w FAIL；dir hook 两分支逐字节相同，exFAT 上 test 2
 PASS 证明 dir hook 不是差异化因素。
 
-## F49 产物（dual-union 首次构建）
+## F49–F59 构建历史（dual-union）
 
-| # | SHA256 | 变更 | 结果 |
-|---|--------|------|------|
-| 49 | `B053C59A` | `install()` 装**并集**：六槽全 hook（slot0=`oem2unicode_dbcs_safe` 两字节安全保持 FAT32 安全）+ slot1/2/4/5 + path-transform + parseShortName + dir + sanitize NOP；`matches_fs` 严格要求六槽+path+SFN+dir+identity_checks | ❌ exFAT：FAIL PASS FAIL，目录重复创建（与 D69657FD 相同） |
+| # | SHA256 | 变更摘要 | 结果 |
+|---|--------|----------|------|
+| 49 | `B053C59A` | 并集六槽全 hook（slot0 两字节受限）+ path/SFN/dir + sanitize NOP | ❌ exFAT：FAIL PASS FAIL（重复建目录）|
+| 50 | `63FCE7FF` | slot0 换回完整三字节 `oem2unicode_utf8`，其余并集不变 | ✅ **exFAT：3 PASS** |
+| 51 | `07DD6224` | `g_fat_path` 介质分发（默认 1 受限）：slot0/slot1 分发 + path-transform 锁存 | ✅ **FAT32：3 PASS** |
+| 52 | `91C73B43` | 仅默认值翻转 0（exFAT/full）+ 锁存实验 | ⚠️ FAT32 3P；**exFAT：FAIL PASS FAIL** |
+| 53 | `8DC516AA` | 移除 4 个 path-transform 锁存（F52 元凶），默认 1 受限安全 | 🧪 待真机 |
+| 55 | `1A374E1E` | 19.0.1 exFAT 引导区校验和锚点集成（探针置 g_fat_path=0）| 🧪 待真机 |
+| 56 | `A195CEFF` | 20.2.0 锚点启用（0x0ED980 / 死区 0x1096C0，NSO0 解析）| 🧪 待真机 |
+| 57 | `66C47498` | 仅默认翻转 0（F50 等价，无锚点依赖）二分实验 | ✅ **20.2.0 exFAT：3 PASS** |
+| 58 | `9FF8B436` | 探针反向写 1（检测锚点是否执行），诊断专用 | 🧪 待真机 |
+| 59 | `B78E72FB` | **无分发方案**：slot0 永远全量 + slot1 永远受限；弃用锚点 | ✅ **双介质 3 PASS** |
+
+> 详细变更与逐 F 结论见下文「各 F 详细注释」。
+
+## 各 F 详细注释
+
+### F49 `B053C59A`
+
+变更：`install()` 装**并集**：六槽全 hook（slot0=`oem2unicode_dbcs_safe` 两字节安全保持 FAT32 安全）+ slot1/2/4/5 + path-transform + parseShortName + dir + sanitize NOP；`matches_fs` 严格要求六槽+path+SFN+dir+identity_checks。
 
 > **F49 结论**：F49 新增的 slot1/2/4/5 + sanitize NOP 在 exFAT 上无任何效果（结果与
 > D69657FD 逐项相同），证明 exFAT 失败路径由 **slot0 两字节有损解码**驱动：exFAT 驱动
 > 路径依赖 slot0 做完整三字节 CJK 解码，有损后建名不匹配 → 重复创建。
 
-| 50 | `63FCE7FF` | F49 基础上 **slot0 换回完整三字节 `oem2unicode_utf8`**（其余并集不变：slot1/2/4/5 + path-transform + SFN + dir + sanitize NOP） | ✅ **exFAT：3 PASS** |
+### F50 `63FCE7FF`
+
+变更：F49 基础上 **slot0 换回完整三字节 `oem2unicode_utf8`**（其余并集不变：slot1/2/4/5 + path-transform + SFN + dir + sanitize NOP）。
 
 > **F50 结论**：slot0 完整三字节 = exFAT 侧唯一缺口，并集（六槽+path-transform+SFN+
 > dir+sanitize NOP）在 exFAT 上完全成立。⚠️ F50 在 **FAT32 上预计黑屏**：源码确认
 > `unicode2oem`（slot1）存在两字节临时缓冲（`pf_path.c:167 tmp_wc` / `:595 Dest[2]`），
 > FAT32 路径写爆 → 真正 dual 需 slot0+slot1 按介质分发。
 
-| 51 | `07DD6224` | **F51 介质分发**：`g_fat_path` 标志（默认 1=FAT32 受限，安全）驱动 slot0/slot1 分发器——slot0（FAT32=`oem2unicode_dbcs_safe` / exFAT=`oem2unicode_utf8`），slot1（FAT32=`unicode2oem_bounded_utf8` 写≤2B / exFAT=`unicode2oem_utf8`）；FAT32 锁存=4 个 path-transform hook 入口；exFAT 锚点 `fs_codecvt_note_exfat_path` 预留未接线；slot2/4/5 保持全量 UTF-8 | ✅ **FAT32：3 PASS** |
+### F51 `07DD6224`
+
+变更：**F51 介质分发**：`g_fat_path` 标志（默认 1=FAT32 受限，安全）驱动 slot0/slot1 分发器——slot0（FAT32=`oem2unicode_dbcs_safe` / exFAT=`oem2unicode_utf8`），slot1（FAT32=`unicode2oem_bounded_utf8` 写≤2B / exFAT=`unicode2oem_utf8`）；FAT32 锁存=4 个 path-transform hook 入口；exFAT 锚点 `fs_codecvt_note_exfat_path` 预留未接线；slot2/4/5 保持全量 UTF-8。
 
 > **F51 结论**：FAT32 侧分发器成立——受限 slot0/slot1 + slot2/4/5 UTF-8 + sanitize NOP 均不破坏
 > FAT32。至此双介质各自 3P：exFAT=F50（`63FCE7FF`），FAT32=F51（`07DD6224`）。
 
-| 52 | `91C73B43` | **F52 决定性实验**：仅把 F51 默认值翻转为 0（exFAT/full，F50 等价），其余不变——检验 FAT32 的 path-transform 锁存是否在首次两字节临时 codecvt 调用前触发 | ⚠️ FAT32：3 PASS；**exFAT：FAIL PASS FAIL（重复建目录）** |
+### F52 `91C73B43`
+
+变更：**F52 决定性实验**：仅把 F51 默认值翻转为 0（exFAT/full，F50 等价），其余不变——检验 FAT32 的 path-transform 锁存是否在首次两字节临时 codecvt 调用前触发。
 
 > **F52 关键结论（推翻旧假设）**：exFAT 上 `g_fat_path` 被锁存成 1（受限），唯一置 1 的
 > 是 4 个 path-transform hook 入口 → **path-transform 例程在 exFAT 上也被调用**（两种介质
@@ -43,7 +66,9 @@ PASS 证明 dir hook 不是差异化因素。
 > ③ 真正的 dual 需**移除 path-transform 锁存** + 默认 1（受限安全）+ **exFAT 专属锚点**（如
 > 0x7A1DC "EXTC" 检测，vtable 间接调用，待确认）置 0。
 
-| 53 | `8DC516AA` | **F53 锚点就绪基座**：移除 4 个 path-transform 锁存调用（F52 元凶，也会撤销未来 exFAT 锚点），默认=1（受限安全），`fs_codecvt_note_exfat_path()` 保持预留 | 🧪 待真机（预期同 F51：FAT32 3P / exFAT 3 FAIL） |
+### F53 `8DC516AA`
+
+变更：**F53 锚点就绪基座**：移除 4 个 path-transform 锁存调用（F52 元凶，也会撤销未来 exFAT 锚点），默认=1（受限安全），`fs_codecvt_note_exfat_path()` 保持预留。
 
 - F53 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`8DC516AA3AB66382ABC11A5853A984F93F86F6CB138527D3443B926D45866953`
@@ -51,7 +76,9 @@ PASS 证明 dir hook 不是差异化因素。
 - **待接入**：exFAT 专属锚点（定位 exFAT 挂载/检测函数后调 `fs_codecvt_note_exfat_path()` 置 0），
   完成后 F53+锚点 = 双介质 dual（FAT32 3P + exFAT 3P）。
 
-| 55 | `1A374E1E` | **F55 锚点集成**：在 F53 基座上 hook **exFAT 引导区校验和函数**（19.0.1 @`0x0E2BA0`，`ams-reverse-engineering-agent` 交付，唯一调用点 `0x0FE690`⊂exFAT 挂载 `0x0FE550`）→ 探针（0xFED00 死区）置 `g_fat_path=0` → slot0/slot1 全量 UTF-8 | 🧪 待真机（双介质） |
+### F55 `1A374E1E`
+
+变更：**F55 锚点集成**：在 F53 基座上 hook **exFAT 引导区校验和函数**（19.0.1 @`0x0E2BA0`，`ams-reverse-engineering-agent` 交付，唯一调用点 `0x0FE690`⊂exFAT 挂载 `0x0FE550`）→ 探针（0xFED00 死区）置 `g_fat_path=0` → slot0/slot1 全量 UTF-8。
 
 - F55 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`1A374E1E128BBF23866A5BD1455F922205AB9A9AD1A9F3A131D498078F05480B`
@@ -64,7 +91,9 @@ PASS 证明 dir hook 不是差异化因素。
   - FAT32 SD：若 eMMC USER 为 FAT32/其他 → 3 PASS；若为 exFAT → 可能回归（此时需把锚点限定到 SD 卷）
 - **多版本**：20.5.0=`0x0EDA80`、21.2.0=`0x0F3210`、22.0/22.5=`0x0F59C0`（cave 待补，本次仅 19.0.1 启用）
 
-| 56 | `A195CEFF` | **F56 20.2.0 锚点启用**：定位并接线 20.2.0 exFAT 引导区校验和锚点。20.2.0 为 **NSO0** 格式（19.0.1 为 NOS0，text_size 字段偏移不同）；锚点 `0x0ED980`=`D101C3FF`(sub sp,#0x70)+`A9017BFD`，体内 `cmp #0x70/#0x6a + ror w24,#1` 校验和循环与 19.0.1 同构（对照 20.5.0 `0x0EDA80` 仅差 0x300）；FAT-only 二进制 `0x0ED980`=`2A1803E3` 非锚点（exFAT-only 验证）；探针死区 `0x1096C0`（dead uni2oem body，dir trampoline `0x1096E0` 前 0x20B，不重叠） | 🧪 待真机（20.2.0 exFAT 3P？） |
+### F56 `A195CEFF`
+
+变更：**F56 20.2.0 锚点启用**：定位并接线 20.2.0 exFAT 引导区校验和锚点。20.2.0 为 **NSO0** 格式（19.0.1 为 NOS0，text_size 字段偏移不同）；锚点 `0x0ED980`=`D101C3FF`(sub sp,#0x70)+`A9017BFD`，体内 `cmp #0x70/#0x6a + ror w24,#1` 校验和循环与 19.0.1 同构（对照 20.5.0 `0x0EDA80` 仅差 0x300）；FAT-only 二进制 `0x0ED980`=`2A1803E3` 非锚点（exFAT-only 验证）；探针死区 `0x1096C0`（dead uni2oem body，dir trampoline `0x1096E0` 前 0x20B，不重叠）。
 
 - F56 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`A195CEFF6AABF48C5A19DA0538485FA2915CC45CB541C0F24F43FB320CB0372C`
@@ -74,7 +103,9 @@ PASS 证明 dir hook 不是差异化因素。
 - **F55 遗留 20.2.0 FAIL PASS FAIL 根因**：20.2.0 表 exfat_cave=0 被 install() 跳过 → 锚点未接线 → g_fat_path 保持 1（受限）→ 20.2.0 exFAT 驱动路径走受限 slot0/slot1 → 重复建目录。F56 已接线。
 - **多卷风险同 F55**：锚点对任意 exFAT 卷触发，需双介质实测确认无 eMMC USER exFAT 误触发。
 
-| 57 | `66C47498` | **F57 决定性二分实验**：仅把 `g_fat_path` 默认翻转为 **0**（exFAT 全量 UTF-8，F50 等价，**无锚点依赖**），其余与 F56 完全相同（含 20.2.0 锚点字段，但默认已是 0） | 🧪 待真机（**只测 20.2.0 exFAT**；FAT32 会黑屏勿测） |
+### F57 `66C47498`
+
+变更：**F57 决定性二分实验**：仅把 `g_fat_path` 默认翻转为 **0**（exFAT 全量 UTF-8，F50 等价，**无锚点依赖**），其余与 F56 完全相同（含 20.2.0 锚点字段，但默认已是 0）。
 
 - F57 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`66C47498CD20A23F012CDE43E25B8D4095BFDF6DDBC1FEE7A20EFC8A1E021DDA`
@@ -85,7 +116,9 @@ PASS 证明 dir hook 不是差异化因素。
 
 > **✅ F57 实机：20.2.0 exFAT = 3 PASS** → 分支 1 成立：**20.2.0 全量 codecvt OK，F56 失败 = 锚点未生效**。
 
-| 58 | `9FF8B436` | **F58 探针执行检测**：默认 0（F57 全量基座，exFAT 3P 已验证）+ 锚点探针**反向写 `g_fat_path=1`**（mov w17,#1 + str w17,[x16]）。探针未执行→全程 0→3P；探针执行→挂载时置 1→受限→FAIL PASS FAIL | 🧪 待真机（20.2.0 exFAT，检测探针是否执行） |
+### F58 `9FF8B436`
+
+变更：**F58 探针执行检测**：默认 0（F57 全量基座，exFAT 3P 已验证）+ 锚点探针**反向写 `g_fat_path=1`**（mov w17,#1 + str w17,[x16]）。探针未执行→全程 0→3P；探针执行→挂载时置 1→受限→FAIL PASS FAIL。
 
 - F58 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`9FF8B436ABB8090BC0B79AF7817CAC9398DAD76361F827CFFE3CE2C2EF57A745`
@@ -94,7 +127,9 @@ PASS 证明 dir hook 不是差异化因素。
 - **探针地址已排除 bug**：KIP 链接基址 0x0（fs_codecvt.ld），ADRP 为 PC 相对，install() 里 `&g_fat_path` 运行时正确；encode_adrp delta < 1MB（F56 有 hook 证明 encode_adrp 成功）
 - **最可能根因**：`0x0ED980` 虽在"挂载函数"（读 VBR+校验+置标志+注册卷）内被唯一调用，但 20.2.0 该函数可能处理**其他 exFAT 卷**（eMMC 分区），SD exFAT 挂载走新路径 → 锚点不触发
 
-| 59 | `B78E72FB` | **F59 无分发方案（锚点方案弃用）**：slot0 永远全量 UTF-8（`oem2unicode_utf8`）+ slot1 永远受限 ≤2B（`unicode2oem_bounded_utf8`）+ slot2/4/5 UTF-8；**移除锚点探针 + 清零全部 exfat offset 字段**。依据 PrFILE2 源码（见下） | ✅ **双介质 3 PASS：20.2.0 exFAT 3P + 19.0.1 FAT32 3P** |
+### F59 `B78E72FB`
+
+变更：**F59 无分发方案（锚点方案弃用）**：slot0 永远全量 UTF-8（`oem2unicode_utf8`）+ slot1 永远受限 ≤2B（`unicode2oem_bounded_utf8`）+ slot2/4/5 UTF-8；**移除锚点探针 + 清零全部 exfat offset 字段**。依据 PrFILE2 源码（见下）。
 
 - F59 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`B78E72FB56085E130E445641426EDB2651EA19DE375473F49DE4B4DA8FDD7F55`
@@ -128,6 +163,8 @@ PASS 证明 dir hook 不是差异化因素。
 - **⚠️ 修正记录**：此前"22.5.0 offset 表错误"是**误报**——验证时用了 `AMS-22.5.0_work\...\FS_proper.nso`，那是 **22.5.0 的 FAT 变体**（六槽在 `0x1001D0`，FAT-only），而 offset 表针对 **ExFAT-capable 变体**（六槽在 `0x111520`）。22.x 的 FAT 变体与 ExFAT-capable 变体 offset **不同**（`build_patches22.py` 有完整对照：FAT=`0x1001D0/.../dir 0xE6F80`，exFAT=`0x111520/.../dir 0xE7040`）。fs_codecvt 只支持 ExFAT-capable（FAT32 介质也跑它）。
 - **实机证据（nx-filesystem-utf8 docs）**：`atmosphere-kip-utf8-overlay-zh_CN.md`："22.5.0 exFAT 介质…三项 PASS；五版本均正常启动且三项验证全部 PASS"；`fat32-media-validation-zh_CN.md`："22.5.0 | FAT32 | ExFAT-capable FS | PASS PASS PASS"。
 - **把握度**：5/5 offset 离线 PASS + 五版本 FAT32 实机回归 + 22.5.0 exFAT 实机（union 前方案）+ F59 新方案 19.0.1 FAT32/20.2.0 exFAT 双介质 3P → **高把握**。F59 与 union 前方案 codecvt 逻辑一致（纯静态六槽替换），仅 slot0/slot1 固定方式不同。
+
+## F50 归档信息
 
 - F50 文件：`flight_test/fs_codecvt_dual_unpacked.kip`
 - SHA-256 完整：`63FCE7FF645B39C3592983496C3D535077A916D965F483748769C817621D9546`
