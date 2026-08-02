@@ -68,9 +68,11 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
             { 0x1086BC, 0x52800055 },
         },
         0xF5AC0, 0xA9BA7BFD,
-        /* exFAT mount anchor: boot-checksum verify @0x0E2BA0 (19.0.1).
-         * cave=0xFED00 (dead unicode2oem body, writable+executable). */
-        0x0E2BA0, 0xD101C3FF, 0xFED00,
+        /* F59: no exFAT anchor. PrFILE2 source proves codeset is CP932-only,
+         * never flipped at mount (p_setcode called once from InitModule), so
+         * a mount anchor cannot work. Dispatcher is fixed: slot0 full / slot1
+         * bounded. */
+        0x0, 0x0, 0x0,
     },
     /* FsVer_20_2_0_Exfat */
     {
@@ -91,12 +93,9 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
             { 0x10086C, 0xD108C3FF },
             { 0x100890, 0x940363A0 },
         },
-        /* exFAT mount anchor: boot-checksum verify @0x0ED980 (20.2.0,
-         * NSO0 format). Verified: entry D101C3FF/A9017BFD, absent in the
-         * FAT-only binary; cave=0x1096C0 (dead uni2oem body, before the
-         * dir trampoline at 0x1096E0, writable+executable). */
+        /* F59: no exFAT anchor (see 19.0.1 note). */
         0x100850, 0xA9BA7BFD,
-        0x0ED980, 0xD101C3FF, 0x1096C0,
+        0x0, 0x0, 0x0,
     },
     /* FsVer_21_2_0_Exfat — full codecvt + dir hook (capstone-verified).
      * Dir hook at 0xE48D0 (b.lo→0xE4864), byte in W10 (ldrb w10,[x28,x8]).
@@ -120,7 +119,7 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
             { 0x106180, 0x94035E70 },
         },
         0x106140, 0xA9BA7BFD,
-        0x0F3210, 0xD101C3FF, 0x0,  /* exFAT anchor 21.2.0; cave TBD */
+        0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
     },
     /* FsVer_22_0_0_Exfat */
     {
@@ -142,7 +141,7 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
             { 0xE70C0, 0xD29FBEE1 },
         },
         0x1089B0, 0xA9BA7BFD,
-        0x0F59C0, 0xD10203FF, 0x0,  /* exFAT anchor 22.0.0; cave TBD */
+        0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
     },
     /* FsVer_22_5_0_Exfat — identical to 22.0.0 */
     {
@@ -164,6 +163,6 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
             { 0xE70C0, 0xD28A9041 },
         },
         0x1089B0, 0xA9BA7BFD,
-        0x0F59C0, 0xD10203FF, 0x0,  /* exFAT anchor 22.5.0; cave TBD */
+        0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
     },
 };
