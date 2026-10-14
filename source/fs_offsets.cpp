@@ -10,7 +10,7 @@
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
  *
- * Offset tables for each supported FS version (exFAT variants, 19.0.0–22.5.0).
+ * Offset tables for each supported FS version (exFAT variants, 19.0.0–23.0.1).
  *
  * Offsets derived from nx-filesystem-utf8 project's build_patches22.py.
  * All values are relative to the decompressed FS .text section. The KIP1
@@ -31,6 +31,9 @@ const u8 g_fs_hashes[FsVer_Count][8] = {
     { 0xFB, 0x0B, 0x68, 0xDB, 0x24, 0x03, 0xD1, 0x19 },
     /* FsVer_22_5_0_Exfat */
     { 0xD4, 0x45, 0x28, 0x29, 0x5B, 0x41, 0x92, 0xBA },
+    /* FsVer_23_0_1_Exfat — FS.kip1 SHA256 FDAF163288E10805... (fw 23.0.1,
+     * shared by 23.0.0). Structurally 22.5.0 shifted by +0x3030. */
+    { 0xFD, 0xAF, 0x16, 0x32, 0x88, 0xE1, 0x08, 0x05 },
 };
 
 /*
@@ -163,6 +166,34 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
             { 0xE70C0, 0xD28A9041 },
         },
         0x1089B0, 0xA9BA7BFD,
+        0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
+    },
+    /* FsVer_23_0_1_Exfat — fw 23.0.1 FS.kip1 (SHA256 FDAF163288E10805...).
+     * Equals the 22.5.0 table shifted by +0x3030: a single ~0x3030-byte code
+     * insertion before dir_hook, verified byte-identical at every hook anchor
+     * (all 6 codecvt slots, dir_hook/ascii/scan, path_from/in, pattern, SFN,
+     * sanitize TBNZ sites, and the 0x153-byte cave).  The ONLY field that is
+     * not a pure shift is identity_checks[5] — the MOV immediate sitting at
+     * dir_reject (0xE70C0 -> 0xEA0F0): 0xD28A9041 -> 0xD2822461. */
+    {
+        { 0x114550, 0x1146A0, 0x114870, 0x1148B0, 0x114900, 0x114910 },
+        { 0x10B7B4, 0x10BA60, 0x10C5B4 },
+        0xEA070, 0xEA0F0, 0xEA074, 0xEA0B8,
+        26, 24, 9, 0,
+        0x1146A0 + UNI2OEM_CODE_SIZE,
+        0x114870 - (0x1146A0 + UNI2OEM_CODE_SIZE),
+        { 0x39C00008, 0x12001D0B }, 0x54000409,
+        0x10B770, 0x10B880, 0xD10103FF, 0xA9BC7BFD,
+        0x10A440, 0xD10103FF,
+        {
+            { 0x10B774, 0xA9017BFD },
+            { 0x10B784, 0x528005C8 },
+            { 0x10B894, 0x39400028 },
+            { 0x10A464, 0x7100053F },
+            { 0x10B9FC, 0xD10903FF },
+            { 0xEA0F0, 0xD2822461 },
+        },
+        0x10B9E0, 0xA9BA7BFD,
         0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
     },
 };

@@ -26,8 +26,9 @@ enum FsVersion : u32 {
     FsVer_21_2_0_Exfat  = 2,
     FsVer_22_0_0_Exfat  = 3,
     FsVer_22_5_0_Exfat  = 4,
+    FsVer_23_0_1_Exfat  = 5,
 
-    FsVer_Count         = 5,
+    FsVer_Count         = 6,
 };
 
 struct FsOpcodeCheck {
