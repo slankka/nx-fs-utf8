@@ -46,7 +46,7 @@ fsoverlay=bootloader/fsoverlays/fs_codecvt_dual_unpacked.kip
 
 | 项目 | 链接 |
 |---|---|
-| 本 KIP 发布地址 | <https://github.com/slankka/nx-fs-utf8/releases/tag/3.1.0> |
+| 本 KIP 发布地址 | <https://github.com/slankka/nx-fs-utf8/releases/tag/3.2.0> |
 | 加载本 KIP 所需的 Hekate（当前**唯一**支持 `fsoverlay` 的版本）| <https://github.com/slankka/hekate-fs-overlay/releases/tag/fo-1> |
 
 ## 排障
@@ -67,6 +67,12 @@ fsoverlay=bootloader/fsoverlays/fs_codecvt_dual_unpacked.kip
 | 21.2.0 | ✅ offset verified | ✅ offset verified | ✅ offset verified |
 | 22.0.0 | ✅ offset verified | ✅ offset verified | ✅ offset verified |
 | 22.5.0 | ✅ offset verified | ✅ offset verified | ✅ offset verified |
+| 23.0.1 | — | ⚠️ offset derived | ⚠️ offset derived |
+
+> **说明**：
+> - **TESTED (3/3)**：使用本 KIP 的实机回归（三项检查全部 PASS）。
+> - **offset verified**：opcode 级偏移校验通过，保证运行时能正确选择并挂钩该版本，但该组合的实机回归尚未进行。
+> - **⚠️ offset derived**：**23.0.1 为纯推导，尚未实机验证**。其镜像与 22.5.0 的偏移表整体平移 `+0x3030`（仅一处非平移字段单独调整）后一致，但尚未在实机回归。23.0.0 与本版本共用同一 FS 二进制。
 
 ---
 
@@ -86,4 +92,4 @@ fsoverlay=bootloader/fsoverlays/fs_codecvt_dual_unpacked.kip
 
 ---
 
-*作者：知识碎片 · 时间：2026-08-03*
+*作者：知识碎片 · 时间：2026-10-14*
