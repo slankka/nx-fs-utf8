@@ -1,10 +1,14 @@
-# v3.2.0 — HOS 23.0.1 Support
+# v3.2.0 — HOS 23.0.0 / 23.0.1 Support
 
 **Release asset:** `fs_codecvt_dual_unpacked.kip`
 
 Adds the exFAT-capable FS of **HOS 23.0.0 / 23.0.1** to the dual-media UTF-8 FS
 Overlay KIP. Everything from v3.1.0 is unchanged — same media-independent
 codecvt, same single-KIP-for-both-media design.
+
+> **Revision note.** An earlier revision of this note marked 23.0.1 as
+> "offset derived" and implied it was unverified. That was wrong.
+> **23.0.1 is confirmed on real hardware in emuMMC.**
 
 ## What's New
 
@@ -15,65 +19,68 @@ codecvt, same single-KIP-for-both-media design.
   byte-identically. The only field that is *not* a pure shift is one identity
   check at `dir_reject` (`0xD28A9041 → 0xD2822461`), updated accordingly.
 - One KIP now covers the exFAT-capable FS of **19.0.1, 20.2.0, 21.2.0, 22.0.0,
-  22.5.0 and 23.0.1** (23.0.0 shares the same FS binary).
+  22.5.0 and 23.0.1** (23.0.0 shares the same FS binary as 23.0.1).
 
 ## Support Matrix
 
-| HOS Version | FAT32 media (alone) | exFAT media (alone) | One-KIP dual-media |
-|---|---|---|---|
-| 19.0.1 | ✅ TESTED (3/3) | ✅ offset verified | ✅ offset verified |
-| 20.2.0 | ✅ offset verified | ✅ TESTED (3/3) | ✅ offset verified |
-| 21.2.0 | ✅ offset verified | ✅ offset verified | ✅ offset verified |
-| 22.0.0 | ✅ offset verified | ✅ offset verified | ✅ offset verified |
-| 22.5.0 | ✅ offset verified | ✅ offset verified | ✅ offset verified |
-| **23.0.1** | — | ⚠️ offset derived | ⚠️ offset derived |
+This KIP is an **emuMMC** deliverable. See the SysNAND note below.
 
-The three checks cover: direct CJK file read/write, `/ROM` enumeration showing
-the CJK directory, and enumerating files inside the CJK directory — including
-the Chinese directory duplication issue previously reported.
+| HOS | FAT32 media | exFAT media |
+|---|---|---|
+| 19.0.1 | ✅ TESTED (3/3) | ✅ offset verified |
+| 20.2.0 | ✅ offset verified | ✅ TESTED (3/3) |
+| 21.2.0 | ✅ offset verified | ✅ offset verified |
+| 22.0.0 | ✅ offset verified | ✅ offset verified |
+| 22.5.0 | ✅ offset verified | ✅ offset verified |
+| **23.0.0 / 23.0.1** | — | ✅ **TESTED (3/3)** |
 
-Notes on the matrix:
+- **TESTED (3/3)** — real-hardware PASS for direct CJK read/write, `/ROM`
+  enumeration showing the CJK directory, and enumeration *inside* the CJK
+  directory.
+- **offset verified** — the `matches_fs` opcode check passes against that
+  version's FS image; on-console regression on that exact combination is still
+  pending.
 
-- **TESTED (3/3)** — real-hardware PASS for all three checks with *this*
-  release's KIP (`fs_codecvt_dual_unpacked.kip`): HOS 19.0.1 on FAT32, and
-  HOS 20.2.0 on exFAT.
-- **offset verified** — the `matches_fs` opcode-level offset check passes
-  against that version's exFAT-capable FS image (six-slot table + dir/path/
-  pattern/SFN + identity checks). The KIP is guaranteed to select and hook the
-  correct version at runtime, but on-console regression on that combination is
-  still pending.
-- **⚠️ offset derived** — **23.0.1 is derived, not hardware-tested.** The image
-  matches the 22.5.0 table shifted by `+0x3030` with the single non-shifted
-  field adjusted, but no on-console regression has been run yet. Feedback
-  welcome via [Issues](https://github.com/slankka/nx-fs-utf8/issues).
+## SysNAND: known black screen
+
+**Do not use this KIP on SysNAND.** Loading it against the real system produces
+a **black screen with no on-screen error** — the console hangs before anything
+can be displayed.
+
+This is not specific to 23.0.1. It reproduces identically on 19.0.1, 22.5.0 and
+23.0.1, and at every overlay extent from `0x1000` to `0x60000`. Prepending code
+to the FS process image on SysNAND does not work, because FS is the first
+initial process and `fatal` is not yet available to report anything.
+
+It works on emuMMC because there the overlay is placed in front of *emummc's*
+`_start`, which performs its own `SVC 0x73` permission setup before handing over
+to FS. That composition does not exist on SysNAND.
+
+If you need UTF-8 paths on SysNAND, keep booting SysNAND without an overlay.
+Supporting SysNAND is out of scope for this release.
 
 ## Requirements
 
-- **[slankka/hekate-fs-overlay](https://github.com/slankka/hekate-fs-overlay)** —
-  an unofficial Hekate fork adding support for prepending overlay KIPs to the
-  FS process image. **This KIP can only be loaded by this modified Hekate.**
-- exFAT-capable FS image (FAT32 media also boots on the exFAT-capable FS)
+[slankka/hekate-fs-overlay](https://github.com/slankka/hekate-fs-overlay) — an
+unofficial Hekate fork adding `fsoverlay=` support. This KIP cannot be loaded
+without it.
 
-> **Note:** this is an FS Overlay KIP, **not** a standalone Initial Process KIP.
-> Do **not** load it with Hekate's `kip1=` key. It must be merged into the
-> existing `FS.kip1` process image by the FS Overlay-aware loader in the
-> [`slankka/hekate-fs-overlay`](https://github.com/slankka/hekate-fs-overlay)
-> fork.
+> **Note:** `fs_codecvt_dual_unpacked.kip` is an FS **Overlay** KIP, not a
+> standalone Initial Process KIP. Do **not** load it with `kip1=` — it must be
+> merged into the existing FS process image by the overlay-aware loader.
 
 ## Installation
 
 1. Download `fs_codecvt_dual_unpacked.kip` from this release.
-2. Place it on the SD card at
-   `sdmc:/bootloader/fsoverlays/fs_codecvt_dual_unpacked.kip`
+2. Place it at `sdmc:/bootloader/fsoverlays/fs_codecvt_dual_unpacked.kip`
 
-**Hekate boot entry** (`bootloader/hekate_ipl.ini`):
+**Hekate boot entry** (`bootloader/hekate_ipl.ini`) — emuMMC only:
 
 ```ini
+[虚拟系统-中文路径]
+emummcforce=1
 fsoverlay=bootloader/fsoverlays/fs_codecvt_dual_unpacked.kip
 ```
-
-(If your `fsoverlay=` line already references a different filename, update the
-path to match the file you actually copied.)
 
 ## Verify the CJK round trip
 
@@ -91,12 +98,16 @@ SHA-256: C438EB09D6ED9A921F7DB834A020143811224369A4195F56D3B8A3114A0D445F
 
 ## Rollback
 
-Remove the `fsoverlay=` line — the stock FS image is untouched. Historical
-builds remain available on the `codex/exfat` branch and in earlier releases.
+Remove the `fsoverlay=` line from `hekate_ipl.ini`. The stock FS image on disk
+is never modified, so nothing needs to be restored.
+
+Historical builds remain available on the `codex/exfat` branch and in earlier
+releases.
 
 ---
 
 ## Attribution & Notes
 
-- For details see `docs/fs-header-formats-zh_CN.md` and the flight-test
-  manifest (`flight_test/MANIFEST.md`).
+- For the overlay mechanism and header layouts see
+  `docs/fs-header-formats-zh_CN.md`, and the flight-test manifest
+  (`flight_test/MANIFEST.md`).
