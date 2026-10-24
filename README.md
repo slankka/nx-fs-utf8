@@ -367,7 +367,7 @@ addresses recorded in its section headers — moves up by the same total.
 | Scope | Status |
 |---|---|
 | emuMMC | verified on hardware (20.2.0, 23.0.1) |
-| sysMMC | verified on hardware (20.5.0，23.0.1, 3/3 CJK checks) |
+| sysMMC | verified on hardware (19.0.1，20.5.0，23.0.1, 3/3 CJK checks) |
 | 4-byte UTF-8 (non-BMP, e.g. emoji) | not covered |
 | FAT32 8.3 alias | lossy; the short-name generator is not replaced |
 | Loader must read `emummc.kipm` | capability donor only; removing this dependency is planned |
