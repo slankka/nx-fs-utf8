@@ -242,19 +242,42 @@ make -j4
 The build produces:
 
 ```text
-fs_codecvt_exfat.elf
-fs_codecvt_exfat_unpacked.kip
+fs_codecvt_dual.elf
+fs_codecvt_dual_unpacked.kip
 ```
 
 The unpacked KIP is the deployable FS Overlay. Its loadable sections are stored
 without BLZ compression because both supported loaders require an unpacked
 overlay image.
 
+Build options, all off by default:
+
+| Option | Effect |
+|---|---|
+| `HEAP=0x8000` | overlay `.bss` size, which is also the extent FS gets shifted by |
+| `SLOT1_FULL=1` | use the full 3-byte encoder in codecvt slot 1 |
+| `DIAG=0..4` | install only a subset of the hooks, to bisect a boot failure |
+| `DIAG=10..15` | startup-only builds, each adding one step of the sequence |
+| `EXTENT_PAD=0x...` | grow the extent using `.data` instead of `.bss` |
+| `EXTRA_DEFINES=...` | anything else |
+
 Clean generated files with:
 
 ```sh
 make clean
 ```
+
+### Reproducibility
+
+The build is deterministic, with one caveat: the linker stamps a 20-byte
+`GNU build-id` into the image, and that value depends on the absolute path of
+the checkout (because `-g` puts paths into the output ELF, and the build-id
+hashes the whole output). Rebuilding in a different directory therefore
+produces the same code with a different hash.
+
+To match the published asset byte for byte, build from the same path the
+release was cut from. Everything except those 20 bytes is stable either way;
+compare the two images and the only differing region is the build-id note.
 
 ## Test program
 
