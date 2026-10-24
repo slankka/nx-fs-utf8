@@ -58,7 +58,7 @@ fsoverlay=bootloader/fsoverlays/fs_codecvt_dual_unpacked.kip
 
 | 项目 | 链接 |
 |---|---|
-| 本 KIP 发布地址 | <https://github.com/slankka/nx-fs-utf8/releases/tag/3.3.0> |
+| 本 KIP 发布地址 | <https://github.com/slankka/nx-fs-utf8/releases/tag/v3.3.0> |
 | 加载本 KIP 所需的 Hekate（当前**唯一**支持 `fsoverlay` 的版本）| <https://github.com/slankka/hekate-fs-overlay/releases/tag/fo-1> |
 
 ## 排障
