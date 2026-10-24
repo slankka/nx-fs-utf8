@@ -13,11 +13,12 @@ helper tool.
 It is delivered as a small **FS Overlay KIP**: an image prepended *inside* the
 existing FS process by an FS-Overlay-aware Fusee or Hekate.
 
-> **Support status: emuMMC only.** The overlay is currently verified on emuMMC.
-> **sysMMC (emuMMC disabled) is not supported yet** — every attempt to prepend
-> the image there has ended in a black screen before FS starts, and the cause is
-> not yet understood well enough to work around. Treat a sysMMC boot with
-> `fsoverlay=` set as non-functional, not merely untested.
+> **Support status: emuMMC and sysMMC.** Verified on hardware — HOS 23.0.1
+> sysMMC, all three CJK checks passing (`create`, `stat`, `enumerate`).
+> The overlay needs nothing from emuMMC: `bootloader/sys/emummc.kipm` is no
+> longer required, and `kip1patch=emummc` must **not** be set. The merged KIP
+> merely reuses emuMMC's capability array, which the loader copies in
+> regardless of which medium is being booted.
 
 > **Important:** the overlay is *not* a standalone Initial Process KIP. Do not
 > load it with Hekate's `kip1=` key. It deliberately reuses the FS Program ID
@@ -56,18 +57,19 @@ FS's `.text` is mapped read-execute. Before any hook is installed, the overlay:
    reply TLS.
 3. **Maps FS writable.** `svcMapProcessMemory` puts an alias of FS's RX pages
    at a scratch address, which is what makes the writes possible. This is the
-   same privileged call emuMMC uses, which is why the merged KIP needs
-   emuMMC's capability set even on a sysMMC-only boot.
+   same privileged call emuMMC uses, so the merged KIP borrows emuMMC's
+   capability array — not its code, and not its redirection.
 4. **Writes, then flushes.** `armDCacheFlush` + `armICacheInvalidate`, then the
    writable alias is released.
 
 ### What gets written
 
-Fourteen instructions are overwritten: eleven branches into the overlay, and
+Fifteen instructions are overwritten: twelve branches into the overlay, and
 three `NOP`s.
 
 | Site | Count | Replaced with |
 |---|---|---|
+| **RTLD `.dynamic` walk** | **1** | **branch to its own loop head (see below)** |
 | `PF_CHARCODE` six entries | 6 | branch to the UTF-8 codec pair |
 | path / pattern / short-name entries | 4 | branch to full-string converters |
 | `Directory::Read`, mid-function | 1 | branch to a trampoline in a NOP hole |
@@ -78,6 +80,36 @@ its entry, so the trampoline saves every live register, calls the C++ validator,
 and branches back to one of three places depending on the answer — reject,
 continue with the ASCII checks, or continue scanning. `X8` is deliberately left
 free because it carries the next scan index back out.
+
+#### The RTLD hook is not about filenames
+
+Prepending the overlay shifts FS's sections. FS then runs its own RTLD pass
+over `.dynamic`, and one entry's final check compares a computed end against a
+bound derived from the section layout. Once shifted, that check fails and FS
+aborts **before `main()`** — which looks exactly like "the overlay broke
+something", with no on-screen error.
+
+The fix is the same one emuMMC has carried for years: overwrite the trailing
+`b.cond` of that loop with an unconditional branch, so the entry is skipped
+instead of aborting.
+
+```asm
+; 22.5.0, rtld = 0x2DED0, delta = -0x4C
+0x2DED0  b.ne  0x2DE84     ; original
+0x2DED0  b     0x2DE84     ; what this project writes
+0x2DED4  ...               ; the failing final check, now skipped
+```
+
+It is applied first, before any other hook, so a bad offset aborts cleanly
+instead of leaving FS half-patched. The offset table stores the site, the
+delta, and the original opcode; `matches_fs()` validates the opcode *and*
+decodes the delta from its imm19 field, so a table belonging to a different
+build is rejected rather than hooked mid-function.
+
+The other five hooks emuMMC installs replace FS's media path with emuMMC's own
+driver. They cannot be reused here at all — and they are the reason injecting a
+full `emummc.kipm` on sysMMC black-screens even though the loader hook would be
+harmless.
 
 Two consequences worth stating explicitly:
 
@@ -242,9 +274,6 @@ controls, expected results, and the SD-card write warning.
 
 ## Deployment
 
-> **The deployment target is emuMMC.** sysMMC is not supported by this
-> mechanism yet — see [Limitations](#limitations).
-
 The KIP must be loaded through the FS Overlay mechanism. For Hekate, use only
 the fork-specific `fsoverlay=` key shown below; `kip1=` is not compatible with
 the overlay build and must not point to `fs_codecvt_exfat_unpacked.kip`.
@@ -262,8 +291,14 @@ pkg3=atmosphere/package3
 fsoverlay=atmosphere/fs_overlays/fs_codecvt_exfat_unpacked.kip
 ```
 
-When emuMMC is enabled in the Hekate path, use the relocatable emuMMC build
-that derives its text base from `_start`.
+That is the whole configuration. The same entry works on emuMMC and on sysMMC;
+the overlay does not read `emummc.ini`, does not need
+`bootloader/sys/emummc.kipm`, and does not care which medium FS ends up using.
+
+If you boot emuMMC and have been following the older instructions, remove any
+`kip1patch=emummc` line. Injecting the emuMMC KIPM is not only unnecessary now,
+it is harmful: five of its six hooks replace FS's media path with emuMMC's own
+driver, and on sysMMC that driver has nowhere to read from.
 
 The merged FS process image is arranged from lower to higher virtual addresses:
 
@@ -277,34 +312,30 @@ increasing virtual address ─────────────────�
 |<---- 0x8000 -------->|<--- emuMMC extent ---->|
 ```
 
-Both values are offsets inside the merged `.text` region, not absolute
-addresses. Everything the original FS owns — `.rodata`, `.data`, `.bss`, and
-the virtual addresses recorded in its section headers — moves up by the same
-total.
-
-The emuMMC KIP is not an optional decoration here: it is what sets up the
-process memory permissions before control reaches FS. That is why the supported
-configuration is the one where it is present.
+The layout below shows the emuMMC KIP present because that is what a boot with
+emuMMC enabled looks like; on sysMMC that middle region is simply absent. Both
+values are offsets inside the merged `.text` region, not absolute addresses.
+Everything the original FS owns — `.rodata`, `.data`, `.bss`, and the virtual
+addresses recorded in its section headers — moves up by the same total.
 
 ## Limitations
 
 | Scope | Status |
 |---|---|
-| emuMMC | verified on hardware |
-| sysMMC (emuMMC disabled) | **not supported** |
+| emuMMC | verified on hardware (20.2.0, 23.0.1) |
+| sysMMC | verified on hardware (23.0.1, 3/3 CJK checks) |
 | 4-byte UTF-8 (non-BMP, e.g. emoji) | not covered |
 | FAT32 8.3 alias | lossy; the short-name generator is not replaced |
 
-### sysMMC
+### What sysMMC used to fail on
 
-Every configuration tried so far — varying the memory extent, the section
-layout, the capability set, whether `.text` stays compressed, and even an
-overlay that only jumps straight back into the stock entry point — has produced
-a black screen before FS starts. Because even a pass-through overlay fails, the
-problem is in prepending itself on that path, not in this project's hooks.
+Earlier builds black-screened on sysMMC with no on-screen error. The cause was
+not permissions, capability set, extent or compression — it was the RTLD walk
+described above. Once that single branch is patched, sysMMC boots and passes the
+same three checks as emuMMC.
 
-We do not have a mechanism for it. Do not report sysMMC results as working,
-and do not enable `fsoverlay=` on a sysMMC-only setup.
+An overlay with no hooks at all used to fail the same way, which is what made
+the bug hard to see: the abort happened before any of this project's code ran.
 
 ## Safety
 
@@ -313,9 +344,6 @@ testing a new firmware or FS variant.
 
 The overlay fails closed: it identifies the FS build by instruction signatures
 before installing anything, and an unsupported build simply runs unmodified.
-That protects against an unrecognised firmware version; it does not protect
-against booting on an unsupported configuration, which is what the sysMMC case
-above is.
 
 ## License and credits
 

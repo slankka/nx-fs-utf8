@@ -34,6 +34,10 @@ const u8 g_fs_hashes[FsVer_Count][8] = {
     /* FsVer_23_0_1_Exfat — FS.kip1 SHA256 FDAF163288E10805... (fw 23.0.1,
      * shared by 23.0.0). Structurally 22.5.0 shifted by +0x3030. */
     { 0xFD, 0xAF, 0x16, 0x32, 0x88, 0xE1, 0x08, 0x05 },
+    /* FsVer_19_0_1_Fat32 — FAT-only FS.kip1 SHA256 D94C6815F8F50A20...
+     * (BootImagePackage 0100000000000819). Verified 16/16 guards against
+     * FS_proper.nso (NOS0, .text 0x1BF8A4). */
+    { 0xD9, 0x4C, 0x68, 0x15, 0xF8, 0xF5, 0x0A, 0x20 },
 };
 
 /*
@@ -76,6 +80,8 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
          * a mount anchor cannot work. Dispatcher is fixed: slot0 full / slot1
          * bounded. */
         0x0, 0x0, 0x0,
+        /* rtld */
+        0x275F0, -0x50, 0x54FFFD81,
     },
     /* FsVer_20_2_0_Exfat */
     {
@@ -99,6 +105,8 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
         /* F59: no exFAT anchor (see 19.0.1 note). */
         0x100850, 0xA9BA7BFD,
         0x0, 0x0, 0x0,
+        /* rtld */
+        0x2B594, -0x4C, 0x54FFFDA1,
     },
     /* FsVer_21_2_0_Exfat — full codecvt + dir hook (capstone-verified).
      * Dir hook at 0xE48D0 (b.lo→0xE4864), byte in W10 (ldrb w10,[x28,x8]).
@@ -123,6 +131,8 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
         },
         0x106140, 0xA9BA7BFD,
         0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
+        /* rtld */
+        0x2E1C0, -0x4C, 0x54FFFDA1,
     },
     /* FsVer_22_0_0_Exfat */
     {
@@ -145,6 +155,8 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
         },
         0x1089B0, 0xA9BA7BFD,
         0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
+        /* rtld */
+        0x2DED0, -0x4C, 0x54FFFDA1,
     },
     /* FsVer_22_5_0_Exfat — identical to 22.0.0 */
     {
@@ -167,6 +179,8 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
         },
         0x1089B0, 0xA9BA7BFD,
         0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
+        /* rtld */
+        0x2DED0, -0x4C, 0x54FFFDA1,
     },
     /* FsVer_23_0_1_Exfat — fw 23.0.1 FS.kip1 (SHA256 FDAF163288E10805...).
      * Equals the 22.5.0 table shifted by +0x3030: a single ~0x3030-byte code
@@ -195,5 +209,37 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
         },
         0x10B9E0, 0xA9BA7BFD,
         0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
+        /* rtld */
+        0x2F530, -0x4C, 0x54FFFDA1,
+    },
+    /* FsVer_19_0_1_Fat32 — FAT-only FS (BootImagePackage 0819).
+     * Values cross-checked against AMS-19.0.1/FAT/pk2_out/ini1_out/FS_proper.nso
+     * (NOS0 text @0x1000 size 0x1BF8A4, SHA256 D94C6815...): all 16 guards pass.
+     *
+     * FAT32 has no NOP region, so the code cave sits INSIDE the dead body of
+     * unicode2oem (entry 0xECE90 is overwritten with a B, making everything
+     * after it unreachable).  The trampoline installer writes there. */
+    {
+        { 0xECD20, 0xECE90, 0xED060, 0xED0A0, 0xED0F0, 0xED100 },
+        { 0xFA458, 0xFA658, 0xFB148 },
+        0xD4A94, 0xD4A30, 0xD4A98, 0xD4AC0,
+        25, 19, 9, 0,
+        0xECF44,                          /* cave: verified in patches.ini */
+        0xED060 - 0xECF44,                /* cave_size = 0x11C */
+        { 0x39C00008, 0x12001D0A }, 0x54FFFCE3,
+        0xFA410, 0xFA530, 0xD10143FF, 0xA9BC7BFD,
+        0xF9190, 0xD10103FF,
+        {
+            { 0xF9938, 0x54000261 },
+            { 0xFA9F0, 0xF9400F48 },
+            { 0xFA9F4, 0xD63F0100 },
+            { 0xF5D5C, 0x94000F69 },
+            { 0xF5DF4, 0x2A0003F5 },
+            { 0xF5EB0, 0x52800055 },
+        },
+        0xFA5D0, 0xA9BA7BFD,
+        0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
+        /* rtld */
+        0x275F0, -0x50, 0x54FFFD81,
     },
 };

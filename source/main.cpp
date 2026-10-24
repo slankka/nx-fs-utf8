@@ -22,6 +22,17 @@ extern "C" void __libc_init_array(void);
 extern char _start;
 extern char __argdata__;
 
+/* Diagnostic builds bisect a boot-time black screen.  4 = shipping behaviour. */
+#ifndef FS_DIAG_LEVEL
+#define FS_DIAG_LEVEL 4
+#endif
+
+#if defined(FS_DIAG_EXTENT_PAD)
+/* Padding to grow the overlay extent without declaring any .bss, so that
+ * "extent too large" can be tested independently of "bss present". */
+extern "C" volatile u8 g_extent_pad[FS_DIAG_EXTENT_PAD] = { 1 };
+#endif
+
 static uintptr_t fs_code_base;
 static size_t fs_code_size;
 static u8 *fs_rw_mapping;
@@ -82,13 +93,21 @@ static pf_s32 unicode2oem_bounded_utf8(const pf_u16* src, pf_s8* dst) {
     return (3 << 16) | 2;
 }
 
-/* F59 (no-dispatch): slot1 ALWAYS bounded (<=2 byte) UTF-8 encoder.
+/* F59 (no-dispatch): slot1 is bounded (<=2 byte) UTF-8 by default.
  * FAT32 fix (F51): PrFILE2 has 3 strict 2-byte DBCS temps
  * (OEM_ConvertFWchar / GetNextCharOfPattern / GetLengthFromUnicode) — a
  * 3-byte CJK write would smash the stack (FAT32 black-screen root cause).
- * exFAT must be verified: bounded truncates 3-byte CJK to 2 bytes. */
+ *
+ * FS_SLOT1_FULL=1 restores the F57/F50 behaviour (full encoder) for A/B
+ * testing: exFAT media has never been validated with the bounded encoder, and
+ * a truncated 3-byte CJK sequence produces a length/count mismatch that can
+ * overrun caller buffers. */
 static pf_s32 unicode2oem_dual(const pf_u16* src, pf_s8* dst) {
+#ifdef FS_SLOT1_FULL
+    return unicode2oem_utf8(src, dst);
+#else
     return unicode2oem_bounded_utf8(src, dst);
+#endif
 }
 
 static constexpr u32 NOP = 0xD503201F;
@@ -126,6 +145,13 @@ static bool encode_adrp(uintptr_t pc, uintptr_t target_page, u32 *out, u32 rd) {
     const u64 imm = static_cast<u64>(delta & 0x1FFFFF);
     *out = 0x90000000u | ((imm & 0x3) << 29) | (((imm >> 2) & 0x7FFFF) << 5) | (rd & 0x1F);
     return true;
+}
+
+/* Signed byte delta encoded in a B.cond's imm19 field. */
+static s32 decode_b_cond_delta(u32 opcode) {
+    s32 imm19 = (opcode >> 5) & 0x7FFFF;
+    if (imm19 & 0x40000) imm19 -= 0x80000;
+    return imm19 * 4;
 }
 
 static u32 encode_add_imm12(u32 rd, u32 rn, u32 imm12) {
@@ -186,6 +212,7 @@ static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffs
         return false;
     }
     u32 max_offset = o->codecvt[5] + sizeof(u32);
+    if (o->rtld + sizeof(u32) > max_offset) max_offset = o->rtld + sizeof(u32);
     for (int i = 0; i < 3; ++i) {
         if (o->sanitize[i] + sizeof(u32) > max_offset) max_offset = o->sanitize[i] + sizeof(u32);
     }
@@ -217,6 +244,13 @@ static bool matches_fs(uintptr_t base, uintptr_t region_end, const FsCodecvtOffs
         }
     }
     if (o->parse_shortname_entry && *reinterpret_cast<const volatile u32 *>(base + o->parse_shortname_entry) != o->parse_shortname_entry_opcode) return false;
+    /* The rtld site must be a B.cond whose target is exactly what the table
+     * says; anything else means the offset belongs to a different build. */
+    if (o->rtld) {
+        const u32 op = *reinterpret_cast<const volatile u32 *>(base + o->rtld);
+        if (op != o->rtld_opcode) return false;
+        if (decode_b_cond_delta(op) != o->rtld_delta) return false;
+    }
     if (o->exfat_mount_entry && o->exfat_mount_opcode &&
         *reinterpret_cast<const volatile u32 *>(base + o->exfat_mount_entry) != o->exfat_mount_opcode) return false;
     for (int i = 0; i < 3; ++i) {
@@ -256,8 +290,28 @@ static bool install(void) {
         !o->path_from_unicode || !o->path_in_unicode ||
         !o->pattern_next_char || !o->parse_shortname_entry ||
         !o->dir_hook || !o->dir_reject || !o->dir_ascii_checks ||
-        !o->dir_scan_continue || !o->cave || !o->cave_size) {
+        !o->dir_scan_continue || !o->cave || !o->cave_size || !o->rtld) {
         return false;
+    }
+
+    /* F60: the rtld workaround is mandatory, not cosmetic.
+     *
+     * Prepending this overlay moves FS's sections, which changes the values
+     * its RTLD walk compares against. One `.dynamic` entry then fails its
+     * final check and FS aborts before main() -- observed as a black screen
+     * on every sysMMC attempt and, with a pass-through emuMMC KIPM, on
+     * emuMMC too. emuMMC carries the same fix: overwrite the trailing
+     * B.cond of that loop with an unconditional branch so the entry is
+     * skipped. Hardware-verified on 23.0.1 sysMMC with emuMMC's rtld-only
+     * KIPM: boots and passes all three CJK tests.
+     *
+     * Done before anything else so a failure here aborts cleanly. */
+    {
+        u32 rtld_op;
+        const uintptr_t rtld_pc = fs_code_base + o->rtld;
+        const uintptr_t rtld_target = rtld_pc + o->rtld_delta;
+        if (!encode_b(rtld_pc, rtld_target, &rtld_op)) return false;
+        w32(rtld_pc, rtld_op);
     }
 
     /* F51 dual medium dispatch: slot0 + slot1 switch on g_fat_path.
@@ -276,8 +330,18 @@ static bool install(void) {
         reinterpret_cast<uintptr_t>(&unicode_char_width_utf8),
         reinterpret_cast<uintptr_t>(&is_unicode_mb_utf8),
     };
+#if FS_DIAG_LEVEL == 0
+    /* Overlay is prepended but nothing is patched: isolates hekate's injection
+     * (segment shift, capabilities, page layout) from the hook set. */
+    return true;
+#endif
+#if FS_DIAG_LEVEL == 1
+    constexpr int codecvt_count = 1;
+#else
+    constexpr int codecvt_count = 6;
+#endif
     u32 codecvt_hooks[6];
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < codecvt_count; ++i) {
         if (!encode_b(fs_code_base + o->codecvt[i], codecvt_targets[i],
                       &codecvt_hooks[i])) return false;
     }
@@ -285,6 +349,7 @@ static bool install(void) {
     /* High-level complete-string converters (FAT32/PrFILE2-VF driver path).
      * These receive full NUL-terminated strings and perform lossless UTF-8
      * conversion; on the exFAT driver path they are harmless dormant hooks. */
+#if FS_DIAG_LEVEL >= 3
     u32 path_from_hook, path_in_hook, pattern_next_hook, parse_shortname_hook;
     if (!encode_b(fs_code_base + o->path_from_unicode,
                   reinterpret_cast<uintptr_t>(&transform_from_unicode_to_normal_utf8),
@@ -298,7 +363,9 @@ static bool install(void) {
     if (!encode_b(fs_code_base + o->parse_shortname_entry,
                   reinterpret_cast<uintptr_t>(&parse_short_name_utf8_fat),
                   &parse_shortname_hook)) return false;
+#endif
 
+#if FS_DIAG_LEVEL >= 4
     /* The hook is in the middle of Directory::Read, not at an ABI
      * function boundary. Preserve every live caller-saved register except X8,
      * which deliberately receives the validated next scan index. The C++
@@ -340,17 +407,22 @@ static bool install(void) {
         for(int i=0;i<ti;i++)w32(cb+i*4,t[i]);
         w32(fs_code_base + o->dir_hook, dir_hook);
     }
+#endif
 
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < codecvt_count; ++i) {
         w32(fs_code_base + o->codecvt[i], codecvt_hooks[i]);
     }
+#if FS_DIAG_LEVEL >= 3
     w32(fs_code_base + o->path_from_unicode, path_from_hook);
     w32(fs_code_base + o->path_in_unicode, path_in_hook);
     w32(fs_code_base + o->pattern_next_char, pattern_next_hook);
     w32(fs_code_base + o->parse_shortname_entry, parse_shortname_hook);
+#endif
+#if FS_DIAG_LEVEL >= 2
     for (int i = 0; i < 3; ++i) {
         if (o->sanitize[i]) nop(fs_code_base + o->sanitize[i]);
     }
+#endif
 
     /* F55: exFAT mount anchor.  The exFAT boot-checksum verify function
      * (0x0E2BA0 on 19.0.1) runs ONLY on the exFAT mount success path, before
@@ -366,6 +438,11 @@ static bool install(void) {
 }
 
 extern "C" void __init(void) {
+#if (FS_DIAG_LEVEL == 9) || (FS_DIAG_LEVEL >= 12 && FS_DIAG_LEVEL <= 14)
+    /* Inert pass-through: never reached in the startup-only diagnostic builds
+     * (start.s skips BL __init), and kept inert for DIAG=9. */
+    return;
+#else
     __libc_init_array();
     MemoryInfo mi; u32 pi;
     /* startup has already split this overlay's own text/rodata/data permissions,
@@ -387,4 +464,5 @@ extern "C" void __init(void) {
     armDCacheFlush(fs_rw_mapping,fs_code_size);
     armICacheInvalidate((void*)fs_code_base,fs_code_size);
     unmap();
+#endif
 }

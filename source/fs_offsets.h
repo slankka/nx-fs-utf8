@@ -28,7 +28,12 @@ enum FsVersion : u32 {
     FsVer_22_5_0_Exfat  = 4,
     FsVer_23_0_1_Exfat  = 5,
 
-    FsVer_Count         = 6,
+    /* FAT-only variants (BootImagePackage 0100000000000819).
+     * Distinct binaries from the exFAT-capable ones: they do not merely differ
+     * by a displacement, so they need their own table. */
+    FsVer_19_0_1_Fat32  = 6,
+
+    FsVer_Count         = 7,
 };
 
 struct FsOpcodeCheck {
@@ -76,6 +81,22 @@ struct FsCodecvtOffsets {
     u32 exfat_mount_opcode;  /* exact original first instruction (guard) */
     u32 exfat_cave;          /* writable+executable dead spot for the probe
                               * machine code (0 = skip anchor hooking) */
+
+    /* --- rtld hook (required after prepending, see docs/sysnand-rtld-hook.md) ---
+     *
+     * Once FS is shifted, its RTLD walk over `.dynamic` fails its final
+     * check for one entry and FS aborts before main(). emuMMC carries a
+     * workaround for exactly this: it overwrites the trailing `b.cond` of
+     * that loop with an unconditional branch, so the entry is skipped.
+     *
+     * rtld           : offset of that `b.cond` inside .text
+     * rtld_delta     : signed byte delta from the branch to its target.
+     *                  Read from the instruction itself at runtime, so this
+     *                  field is a documentation/verification aid only.
+     * rtld_opcode    : exact original instruction (guard) */
+    u32 rtld;
+    s32 rtld_delta;
+    u32 rtld_opcode;
 };
 
 /* SHA-256 hash prefix (first 8 bytes) for each supported FS version.
