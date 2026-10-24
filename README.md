@@ -15,10 +15,12 @@ existing FS process by an FS-Overlay-aware Fusee or Hekate.
 
 > **Support status: emuMMC and sysMMC.** Verified on hardware — HOS 23.0.1
 > sysMMC, all three CJK checks passing (`create`, `stat`, `enumerate`).
-> The overlay needs nothing from emuMMC: `bootloader/sys/emummc.kipm` is no
-> longer required, and `kip1patch=emummc` must **not** be set. The merged KIP
-> merely reuses emuMMC's capability array, which the loader copies in
-> regardless of which medium is being booted.
+>
+> Two loader-side notes. `kip1patch=emummc` must **not** be set: that injects
+> emuMMC's code, and five of its six hooks replace FS's media path. And
+> `bootloader/sys/emummc.kipm` must still exist — the loader copies its
+> capability array into the merged KIP, but injects none of its code. See
+> [Deployment](#deployment).
 
 > **Important:** the overlay is *not* a standalone Initial Process KIP. Do not
 > load it with Hekate's `kip1=` key. It deliberately reuses the FS Program ID
@@ -292,13 +294,32 @@ fsoverlay=atmosphere/fs_overlays/fs_codecvt_exfat_unpacked.kip
 ```
 
 That is the whole configuration. The same entry works on emuMMC and on sysMMC;
-the overlay does not read `emummc.ini`, does not need
-`bootloader/sys/emummc.kipm`, and does not care which medium FS ends up using.
+the overlay does not read `emummc.ini`, does not inject emuMMC's code, and does
+not care which medium FS ends up using.
 
 If you boot emuMMC and have been following the older instructions, remove any
 `kip1patch=emummc` line. Injecting the emuMMC KIPM is not only unnecessary now,
 it is harmful: five of its six hooks replace FS's media path with emuMMC's own
 driver, and on sysMMC that driver has nowhere to read from.
+
+### `bootloader/sys/emummc.kipm` is still needed, for one reason
+
+The loader copies the 0x80-byte capability array out of that file into the
+merged KIP, then injects no code at all. It is not optional in the current
+loader: the file missing produces `bootloader/sys/emummc.kipm is missing or
+invalid` and the boot stops.
+
+Those capabilities are what let the overlay call `svcMapProcessMemory` on its
+own process, which is how it gets write access to FS's read-execute pages. FS's
+own capability array is too small for that — measured, not assumed: a build
+that keeps FS's caps and skips the file entirely black-screens on sysMMC,
+because `map_fs()` fails, no hook is installed, and FS then aborts in its RTLD
+walk.
+
+So the dependency is on `emummc.kipm` *as a capability donor*, not as code.
+Replacing it with a hand-written 0x80-byte capability blob would work just as
+well — that is planned for a future version, so the deployment becomes a single
+file. Until then the file has to be present on the SD card.
 
 The merged FS process image is arranged from lower to higher virtual addresses:
 
@@ -326,16 +347,22 @@ addresses recorded in its section headers — moves up by the same total.
 | sysMMC | verified on hardware (23.0.1, 3/3 CJK checks) |
 | 4-byte UTF-8 (non-BMP, e.g. emoji) | not covered |
 | FAT32 8.3 alias | lossy; the short-name generator is not replaced |
+| Loader must read `emummc.kipm` | capability donor only; removing this dependency is planned |
 
 ### What sysMMC used to fail on
 
 Earlier builds black-screened on sysMMC with no on-screen error. The cause was
-not permissions, capability set, extent or compression — it was the RTLD walk
-described above. Once that single branch is patched, sysMMC boots and passes the
-same three checks as emuMMC.
+not the memory extent, the section layout, the compression state, or the hooks
+themselves — it was the RTLD walk described above. Once that single branch is
+patched, sysMMC boots and passes the same three checks as emuMMC.
 
 An overlay with no hooks at all used to fail the same way, which is what made
 the bug hard to see: the abort happened before any of this project's code ran.
+
+Capabilities are a separate, and still current, prerequisite — see the
+`emummc.kipm` note under Deployment. Without them the overlay cannot map FS
+writable, so it installs nothing and the same RTLD abort happens. That is why
+the file stays in the requirements list rather than being a leftover.
 
 ## Safety
 

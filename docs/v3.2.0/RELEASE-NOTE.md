@@ -1,5 +1,9 @@
 # v3.2.0 — HOS 23.0.0 / 23.0.1 Support
 
+> **Superseded by [v3.3.0](../v3.3.0/RELEASE-NOTE.md).** The SysNAND warning at
+> the end of this note is **no longer true** — SysNAND has been supported since
+> v3.3.0. Use v3.3.0 unless you specifically need this build.
+
 **Release asset:** `fs_codecvt_dual_unpacked.kip`
 
 Adds the exFAT-capable FS of **HOS 23.0.0 / 23.0.1** to the dual-media UTF-8 FS
