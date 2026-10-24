@@ -62,6 +62,28 @@ _start:
 
 .section ".crt0","ax"
 startup:
+#if defined(FS_DIAG_KEEP_EXTENT)
+    /* Keep the shipping 0x7000 KIP extent (inner_heap is 0x4000 of .bss) so
+     * that diagnostic variants differ in executed code only, never in the
+     * amount the FS image is shifted by.  These references are never
+     * dereferenced; they exist to defeat --gc-sections. */
+    ADRP X9, __initheap
+    ADD  X9, X9, #:lo12:__initheap
+#endif
+#if defined(FS_DIAG_SKIP_ALL)
+    /* Absolute minimum: do not touch permissions, bss, relocations or the
+     * heap — just hand control to FS.  Used to separate "hekate prepended an
+     * image and shifted the FS sections" from "this overlay's startup ran". */
+#if defined(FS_DIAG_EXTENT_PAD)
+    /* Real reference so the padding in .data survives --gc-sections and keeps
+     * the overlay extent large without declaring any .bss. */
+    ADRP X9, g_extent_pad
+    ADD  X9, X9, #:lo12:g_extent_pad
+#endif
+    ADRP X16, __argdata__
+    ADD  X16, X16, #:lo12:__argdata__
+    BR   X16
+#else
     /* Save LR */
     MOV  X7, X30
 
@@ -99,6 +121,7 @@ startup:
     MOV X25, X5
     MOV X26, X4
 
+#if !defined(FS_DIAG_SKIP_BSS)
     /* Clear .bss */
     ADRP X0, __bss_start__
     ADRP X1, __bss_end__
@@ -113,15 +136,22 @@ startup:
     STR  XZR, [X0, X1]
     B    1b
 
-2:  /* Process .dynamic relocations. */
+2:
+#endif
+
+#if !defined(FS_DIAG_SKIP_RELOC)
+    /* Process .dynamic relocations. */
     MOV  X0, X6
     ADRP X1, __dynamic_start
     ADD  X1, X1, #:lo12:__dynamic_start
     BL   __nx_dynamic
+#endif
 
+#if !defined(FS_DIAG_SKIP_INIT)
     /* Initialize the local heap before running C++ constructors/hooks. */
     BL   __initheap
     BL   __init
+#endif
 
     /* Restore FS's context and jump to FS */
     MOV X0, X25
@@ -132,3 +162,4 @@ startup:
     ADRP X16, __argdata__
     ADD  X16, X16, #:lo12:__argdata__
     BR X16
+#endif

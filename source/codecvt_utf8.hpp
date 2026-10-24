@@ -38,9 +38,19 @@ pf_s32 oem2unicode_utf8(const pf_s8* src, pf_u16* dst);
  * a buffer of at most two bytes. */
 pf_s32 oem2unicode_dbcs_safe(const pf_s8* src, pf_u16* dst);
 
+/* Kept out-of-line and always emitted: the offline in-place FS patcher
+ * (tools/mk_fs_utf8.py) needs to lift this routine as a standalone blob so the
+ * exFAT directory path can use the full 3-byte encoder instead of the bounded
+ * one.  Without these attributes the compiler inlines it and no symbol exists. */
+#if defined(__GNUC__)
+#define PF_CODEC_EXPORT __attribute__((noinline, used))
+#else
+#define PF_CODEC_EXPORT
+#endif
+
 /* (2) Unicode->OEM: UTF-16 code unit → UTF-8 bytes.
  *     Returns (oem_width << 16) | uni_width */
-pf_s32 unicode2oem_utf8(const pf_u16* src, pf_s8* dst);
+PF_CODEC_EXPORT pf_s32 unicode2oem_utf8(const pf_u16* src, pf_s8* dst);
 
 /* (3) OEM char width: byte width of a UTF-8 sequence from first byte. */
 pf_s32 oem_char_width_utf8(const pf_s8* src);
