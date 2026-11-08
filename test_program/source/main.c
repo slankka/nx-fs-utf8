@@ -15,10 +15,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <switch.h>
+#include "ui.h"
 
 #define MAX_LINES 160
 #define LINE_LEN 128
-#define VISIBLE_LINES 38
+
+/* FS module 2, description 1: path does not exist. */
+#define FS_PATH_NOT_FOUND 0x202
+#define ROM_PATH "/ROM"
 
 #define CJK_DIR_NAME "\xE4\xB8\xAD\xE6\x96\x87\xE7\x9B\xAE\xE5\xBD\x95"
 #define CJK_FILE_NAME "\xE5\xBE\x80\xE8\xBF\x94\xE6\xB5\x8B\xE8\xAF\x95.txt"
@@ -28,6 +32,34 @@
 static char g_lines[MAX_LINES][LINE_LEN];
 static int g_line_count;
 
+/* Directory entries are untrusted bytes, and vsnprintf may truncate UTF-8.
+ * Replace malformed sequences before passing text to LVGL. */
+static void sanitize_utf8(char *text) {
+    unsigned char *src = (unsigned char *)text, *dst = src;
+    while (*src) {
+        unsigned n = 1;
+        if (*src < 0x80) {
+            *dst++ = (*src == '\n' || *src == '\r') ? ' ' : *src;
+            src++;
+            continue;
+        }
+        if (*src >= 0xc2 && *src <= 0xdf) n = 2;
+        else if (*src >= 0xe0 && *src <= 0xef) n = 3;
+        else if (*src >= 0xf0 && *src <= 0xf4) n = 4;
+        else { *dst++ = '?'; src++; continue; }
+        unsigned i;
+        for (i = 1; i < n && src[i] && (src[i] & 0xc0) == 0x80; i++) {}
+        if (i != n || (n == 3 && ((*src == 0xe0 && src[1] < 0xa0) ||
+                                    (*src == 0xed && src[1] >= 0xa0))) ||
+                      (n == 4 && ((*src == 0xf0 && src[1] < 0x90) ||
+                                    (*src == 0xf4 && src[1] >= 0x90)))) {
+            *dst++ = '?'; src++; continue;
+        }
+        while (n--) *dst++ = *src++;
+    }
+    *dst = 0;
+}
+
 static void log_line(const char *fmt, ...) {
     if (g_line_count >= MAX_LINES)
         return;
@@ -36,11 +68,32 @@ static void log_line(const char *fmt, ...) {
     va_start(args, fmt);
     vsnprintf(g_lines[g_line_count], LINE_LEN, fmt, args);
     va_end(args);
+    sanitize_utf8(g_lines[g_line_count]);
     g_line_count++;
 }
 
 static void log_result(const char *label, Result rc) {
     log_line("%s: 0x%X %s", label, rc, R_SUCCEEDED(rc) ? "OK" : "FAIL");
+}
+
+static bool ensure_rom_directory(FsFileSystem *fs) {
+    FsDirEntryType type;
+    Result rc = fsFsGetEntryType(fs, ROM_PATH, &type);
+    if (R_SUCCEEDED(rc)) {
+        if (type != FsDirEntryType_Dir) {
+            log_line("setup: /ROM exists but is not a directory");
+            return false;
+        }
+        log_line("setup: /ROM directory exists");
+        return true;
+    }
+    if (rc != FS_PATH_NOT_FOUND) {
+        log_result("stat /ROM", rc);
+        return false;
+    }
+    rc = fsFsCreateDirectory(fs, ROM_PATH);
+    log_result("create /ROM", rc);
+    return R_SUCCEEDED(rc);
 }
 
 static bool name_equals(const char *a, const char *b) {
@@ -156,7 +209,21 @@ static bool ensure_cjk_file(FsFileSystem *fs) {
 }
 
 int main(void) {
-    consoleInit(NULL);
+    if (!ui_init()) {
+        consoleInit(NULL);
+        printf("LVGL / FreeType initialization failed.\nPress PLUS to exit.\n");
+        consoleUpdate(NULL);
+        padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+        PadState error_pad;
+        padInitializeDefault(&error_pad);
+        while (appletMainLoop()) {
+            padUpdate(&error_pad);
+            if (padGetButtonsDown(&error_pad) & HidNpadButton_Plus) break;
+            consoleUpdate(NULL);
+        }
+        consoleExit(NULL);
+        return 1;
+    }
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
 
     PadState pad;
@@ -164,6 +231,8 @@ int main(void) {
 
     FsFileSystem *fs = fsdevGetDeviceFileSystem("sdmc");
     int top = 0;
+    int visible_lines = ui_visible_lines();
+    if (visible_lines > MAX_LINES) visible_lines = MAX_LINES;
 
     log_line("=== sdmc2 v8 CJK roundtrip ===");
     log_line("base: sdmc:/ROM");
@@ -173,6 +242,8 @@ int main(void) {
 
     if (!fs) {
         log_line("sdmc filesystem handle is NULL");
+    } else if (!ensure_rom_directory(fs)) {
+        log_line("setup failed: CJK tests not run");
     } else {
         bool io_ok = ensure_cjk_file(fs);
         bool dir_found = list_dir_find(fs, "/ROM", CJK_DIR_NAME);
@@ -186,23 +257,39 @@ int main(void) {
 
     log_line("=== Done ===");
 
+    int held_direction = 0;
+    u64 next_repeat_ms = 0;
     while (appletMainLoop()) {
         padUpdate(&pad);
         u64 keys = padGetButtonsDown(&pad);
+        u64 held = padGetButtons(&pad);
 
         if (keys & HidNpadButton_Plus)
             break;
-        if ((keys & HidNpadButton_Down) && top + VISIBLE_LINES < g_line_count)
-            top++;
-        if ((keys & HidNpadButton_Up) && top > 0)
-            top--;
+        int direction = !!(held & HidNpadButton_Down) - !!(held & HidNpadButton_Up);
+        u64 now_ms = armTicksToNs(armGetSystemTick()) / 1000000;
+        bool scroll = direction && (direction != held_direction || now_ms >= next_repeat_ms);
+        if (scroll) {
+            if (direction > 0 && top + visible_lines < g_line_count) top++;
+            if (direction < 0 && top > 0) top--;
+            next_repeat_ms = now_ms + (direction != held_direction ? 300 : 50);
+        }
+        held_direction = direction;
 
-        consoleClear();
-        for (int i = 0; i < VISIBLE_LINES && top + i < g_line_count; i++)
-            printf("%s\n", g_lines[top + i]);
-        consoleUpdate(NULL);
+        static char screen[MAX_LINES * (LINE_LEN + 1) + 1];
+        size_t used = 0;
+        for (int i = 0; i < visible_lines && top + i < g_line_count; i++) {
+            size_t len = strlen(g_lines[top + i]);
+            memcpy(screen + used, g_lines[top + i], len);
+            used += len;
+            screen[used++] = '\n';
+        }
+        screen[used] = '\0';
+        ui_show(screen);
+        ui_update();
+        svcSleepThread(16000000);
     }
 
-    consoleExit(NULL);
+    ui_exit();
     return 0;
 }
