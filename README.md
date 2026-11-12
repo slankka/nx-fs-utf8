@@ -219,9 +219,9 @@ signatures before installing anything, so an unsupported FS runs unmodified
 instead of half-patched.
 
 The exFAT branch contains profiles for the exFAT-capable FS variants used by
-HOS 19.0.1, 20.2.0, 21.2.0, 22.0.0, and 22.5.0. It does not contain the
-FAT32-only FS profile. Do not infer cross-version exFAT validation from the
-earlier FAT32-media regression results.
+HOS 19.0.1, 20.2.0, 21.2.0, 22.0.0, 22.5.0, 23.0.1 and 23.5.0. It does not
+contain the FAT32-only FS profile. Do not infer cross-version exFAT validation
+from the earlier FAT32-media regression results.
 
 ## Requirements
 

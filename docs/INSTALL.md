@@ -58,8 +58,8 @@ fsoverlay=bootloader/fsoverlays/fs_codecvt_dual_unpacked.kip
 
 | 项目 | 链接 |
 |---|---|
-| 本 KIP 发布地址 | <https://github.com/slankka/nx-fs-utf8/releases/tag/v3.3.0> |
-| 加载本 KIP 所需的 Hekate（当前**唯一**支持 `fsoverlay` 的版本）| <https://github.com/slankka/hekate-fs-overlay/releases/tag/fo-1> |
+| 本 KIP 发布地址 | <https://github.com/slankka/nx-fs-utf8/releases/tag/v3.4.0> |
+| 加载本 KIP 所需的 Hekate（当前**唯一**支持 `fsoverlay` 的版本）| <https://github.com/slankka/hekate-fs-overlay/releases/tag/v6.5.5-fs-patched> |
 
 ## 排障
 
@@ -80,6 +80,7 @@ fsoverlay=bootloader/fsoverlays/fs_codecvt_dual_unpacked.kip
 | 22.0.0 | ✅ offset verified | ✅ offset verified |
 | 22.5.0 | ✅ offset verified | ✅ offset verified |
 | **23.0.0 / 23.0.1** | ✅ **TESTED (3/3)** | ✅ **TESTED (3/3)** |
+| **23.5.0** | ✅ offset verified | ✅ offset verified |
 
 > **说明**：
 > - **TESTED (3/3)**：使用本 KIP 的实机回归（三项检查全部 PASS）。

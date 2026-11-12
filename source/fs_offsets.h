@@ -27,13 +27,14 @@ enum FsVersion : u32 {
     FsVer_22_0_0_Exfat  = 3,
     FsVer_22_5_0_Exfat  = 4,
     FsVer_23_0_1_Exfat  = 5,
+    FsVer_23_5_0_Exfat  = 6,
 
     /* FAT-only variants (BootImagePackage 0100000000000819).
      * Distinct binaries from the exFAT-capable ones: they do not merely differ
      * by a displacement, so they need their own table. */
-    FsVer_19_0_1_Fat32  = 6,
+    FsVer_19_0_1_Fat32  = 7,
 
-    FsVer_Count         = 7,
+    FsVer_Count         = 8,
 };
 
 struct FsOpcodeCheck {

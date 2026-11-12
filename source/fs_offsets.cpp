@@ -10,7 +10,7 @@
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
  *
- * Offset tables for each supported FS version (exFAT variants, 19.0.0–23.0.1).
+ * Offset tables for each supported FS version (exFAT variants, 19.0.0–23.5.0).
  *
  * Offsets derived from nx-filesystem-utf8 project's build_patches22.py.
  * All values are relative to the decompressed FS .text section. The KIP1
@@ -34,6 +34,9 @@ const u8 g_fs_hashes[FsVer_Count][8] = {
     /* FsVer_23_0_1_Exfat — FS.kip1 SHA256 FDAF163288E10805... (fw 23.0.1,
      * shared by 23.0.0). Structurally 22.5.0 shifted by +0x3030. */
     { 0xFD, 0xAF, 0x16, 0x32, 0x88, 0xE1, 0x08, 0x05 },
+    /* FsVer_23_5_0_Exfat — FS.kip1 SHA256 7B902837F2002749...
+     * (BootImagePackageExFAT 010000000000081b, SDK 23.3.0.0). */
+    { 0x7B, 0x90, 0x28, 0x37, 0xF2, 0x00, 0x27, 0x49 },
     /* FsVer_19_0_1_Fat32 — FAT-only FS.kip1 SHA256 D94C6815F8F50A20...
      * (BootImagePackage 0100000000000819). Verified 16/16 guards against
      * FS_proper.nso (NOS0, .text 0x1BF8A4). */
@@ -208,6 +211,51 @@ const FsCodecvtOffsets g_fs_codecvt_offsets[FsVer_Count] = {
             { 0xEA0F0, 0xD2822461 },
         },
         0x10B9E0, 0xA9BA7BFD,
+        0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
+        /* rtld */
+        0x2F530, -0x4C, 0x54FFFDA1,
+    },
+    /* FsVer_23_5_0_Exfat — fw 23.5.0 FS.kip1 (SHA256 7B902837F2002749...).
+     *
+     * NOT a constant shift of the whole image.  Byte-level alignment of the
+     * 23.0.1 and 23.5.0 .text gives four bands:
+     *   [0x00000..0x576B8)  97.96% identical at delta 0
+     *   [0x576B8..0x58E28)  genuinely rewritten (string/path helpers)
+     *   [0x58E28..0x1E65AC) 95.19% identical at delta +0x10 -- one extra
+     *                        4-instruction prologue was inserted early in
+     *                        the image, so everything after it moved by 0x10
+     *   [0x1E65AC..0x1E92A4) 99.20% identical at delta 0 (tail realigned)
+     *
+     * Every fs_codecvt anchor sits inside the +0x10 band and was re-derived
+     * individually from the disassembly (same mnemonic, same operands, same
+     * neighbours) -- not by blindly adding 0x10.  The 0xA0-byte code cave
+     * (0x1147E0) is byte-identical, and Directory::Read still keeps the
+     * contract the trampoline relies on: name=X26, bound=X24, byte=W9,
+     * scan index=X8.
+     *
+     * The only non-shift field is identity_checks[5], the MOV immediate at
+     * dir_reject: 0xD2822461 (mov x1,#0x1123) -> 0xD28F7C81 (mov x1,#0x7be4).
+     * 22.5.0 had 0xD28A9041 in the same slot, so this immediate changes on
+     * every release and is the most reliable version fingerprint we have. */
+    {
+        { 0x114560, 0x1146B0, 0x114880, 0x1148C0, 0x114910, 0x114920 },
+        { 0x10B7C4, 0x10BA70, 0x10C5C4 },
+        0xEA080, 0xEA100, 0xEA084, 0xEA0C8,
+        26, 24, 9, 0,
+        0x1146B0 + UNI2OEM_CODE_SIZE,
+        0x114880 - (0x1146B0 + UNI2OEM_CODE_SIZE),
+        { 0x39C00008, 0x12001D0B }, 0x54000409,
+        0x10B780, 0x10B890, 0xD10103FF, 0xA9BC7BFD,
+        0x10A450, 0xD10103FF,
+        {
+            { 0x10B784, 0xA9017BFD },
+            { 0x10B794, 0x528005C8 },
+            { 0x10B8A4, 0x39400028 },
+            { 0x10A474, 0x7100053F },
+            { 0x10BA0C, 0xD10903FF },
+            { 0xEA100, 0xD28F7C81 },
+        },
+        0x10B9F0, 0xA9BA7BFD,
         0x0, 0x0, 0x0,  /* F59: no exFAT anchor */
         /* rtld */
         0x2F530, -0x4C, 0x54FFFDA1,

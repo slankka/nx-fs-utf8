@@ -140,7 +140,36 @@ PROFILES = {
         0x10A440, 0xD10103FF,
         [(0x10B774, 0xA9017BFD), (0x10B784, 0x528005C8), (0x10B894, 0x39400028),
          (0x10A464, 0x7100053F), (0x10B9FC, 0xD10903FF), (0xEA0F0, 0xD2822461)],
-        0x10B9E0, 0xA9BA7BFD,    # FAT32-only (non-exFAT-capable) FS.  Values from
+        0x10B9E0, 0xA9BA7BFD,
+        rtld=(0x2F530, 0x54FFFDA1, -0x4C)),
+    # 23.5.0 exFAT-capable FS.kip1 (SHA256 7B902837F2002749...).
+    #
+    # Relationship to 23.0.1: not a constant shift over the whole image.
+    # Byte-level alignment shows
+    #   [0x00000 .. 0x05718)  identical to 23.0.1  (delta +0x0)
+    #   [0x05718 .. 0x058E28) genuinely rewritten  (std::string / UTF-8 path
+    #                          helpers recompiled -- NOT a relocation)
+    #   [0x058E28 .. 0x1E65AC) identical to 23.0.1 shifted by +0x10
+    #                          (one extra 4-instruction prologue inserted
+    #                           around 0x576F0 in an unrelated function)
+    #   [0x1E65AC .. 0x1E92A4) identical to 23.0.1 (delta +0x0)
+    # Every fs_codecvt hook anchor lives in the +0x10 band, so the table is the
+    # 23.0.1 table shifted by +0x10 -- verified instruction-for-instruction with
+    # capstone, including the 0xA0-byte code cave (byte-identical) and the
+    # Directory::Read register contract (name=X26, bound=X24, byte=W9, unchanged).
+    # The only non-shift field is identity_checks[5]: the MOV immediate at
+    # dir_reject, D2822461 (mov x1,#0x1123) -> D28F7C81 (mov x1,#0x7be4).
+    "23.5.0": _mk(
+        [0x114560, 0x1146B0, 0x114880, 0x1148C0, 0x114910, 0x114920],
+        [0x10B7C4, 0x10BA70, 0x10C5C4],
+        0xEA080, 0xEA100, 0xEA084, 0xEA0C8,
+        (26, 24, 9),
+        (0x39C00008, 0x12001D0B), 0x54000409,
+        0x10B780, 0xD10103FF, 0x10B890, 0xA9BC7BFD,
+        0x10A450, 0xD10103FF,
+        [(0x10B784, 0xA9017BFD), (0x10B794, 0x528005C8), (0x10B8A4, 0x39400028),
+         (0x10A474, 0x7100053F), (0x10BA0C, 0xD10903FF), (0xEA100, 0xD28F7C81)],
+        0x10B9F0, 0xA9BA7BFD,
         rtld=(0x2F530, 0x54FFFDA1, -0x4C)),
     # Atmosphere/stratosphere/fs_codecvt/source/fs_offsets.cpp.
     "19.0.1-FAT": _mk(
